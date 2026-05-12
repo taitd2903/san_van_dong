@@ -1,5 +1,6 @@
-import React, { useMemo, useRef, useState } from 'react';
-import './App.css';
+import React, { useMemo, useRef, useState } from "react";
+import "./App.css";
+import { objectLibrary } from "./objectLibrary";
 
 type Cell = {
   col: number;
@@ -11,7 +12,9 @@ type Point = {
   y: number;
 };
 
-type ObstacleType = 'square' | 'wide' | 'custom';
+type LineStyle = "solid" | "dashed";
+
+type ObstacleType = "square" | "wide" | "custom" | "player";
 
 type Obstacle = {
   id: string;
@@ -25,7 +28,7 @@ type Obstacle = {
   rotate: number;
 };
 
-type PaletteItem = {
+export type PaletteItem = {
   id: string;
   type: ObstacleType;
   label: string;
@@ -33,31 +36,32 @@ type PaletteItem = {
   h: number;
   image?: string;
   rotate: number;
+  locked?: boolean;
 };
 
-type RouteTarget =
-  | {
-      kind: 'player';
-      id: 'player';
-      label: string;
-      col: number;
-      row: number;
-      w: number;
-      h: number;
-    }
-  | {
-      kind: 'obstacle';
-      id: string;
-      label: string;
-      col: number;
-      row: number;
-      w: number;
-      h: number;
-    };
+type RouteTarget = {
+  kind: "obstacle";
+  id: string;
+  label: string;
+  col: number;
+  row: number;
+  w: number;
+  h: number;
+};
+
+type ImportedRouteTarget = {
+  kind?: "player" | "obstacle";
+  id?: string;
+  label?: string;
+  col: number;
+  row: number;
+  w?: number;
+  h?: number;
+};
 
 type RouteSection = {
   id: string;
-  axis: 'x' | 'y';
+  axis: "x" | "y";
   lane: number;
 };
 
@@ -66,42 +70,39 @@ type RouteLine = {
   name: string;
   targets: RouteTarget[];
   sections: RouteSection[];
+  color: string;
+  width: number;
+  style: LineStyle;
 };
 
 type DragLaneState = {
   routeId: string;
   sectionId: string;
-  axis: 'x' | 'y';
+  axis: "x" | "y";
   startClientX: number;
   startClientY: number;
   originalLane: number;
 } | null;
 
-type MenuKey =
-  | 'board'
-  | 'player'
-  | 'objects'
-  | 'edit'
-  | 'file'
-  | 'freeLine'
-  | 'route';
+type MenuKey = "board" | "objects" | "edit" | "file" | "freeLine" | "route";
 
 type FreeLine = {
   id: string;
   points: Point[];
   color: string;
   width: number;
+  style: LineStyle;
 };
 
 type ExportObstacleGroupFile = {
-  fileType: 'obstacle-group';
+  fileType: "obstacle-group";
   version: 1;
   exportedAt: string;
   obstacles: Obstacle[];
 };
 
 type ExportFullFieldFile = {
-  fileType: 'full-field';
+  fileType: "full-field";
   version: 1;
   exportedAt: string;
   grid: {
@@ -109,46 +110,21 @@ type ExportFullFieldFile = {
     rows: number;
     cellSize: number;
   };
-  player: Cell;
   obstacles: Obstacle[];
   routes: RouteLine[];
   freeLines: FreeLine[];
+
+  // Giữ để vẫn nhập được file cũ nếu trước đây có player riêng
+  player?: Cell;
 };
 
 const makeId = () => `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
-const createDefaultObjects = (): PaletteItem[] => [
-  {
+const createDefaultObjects = (): PaletteItem[] =>
+  objectLibrary.map((item) => ({
+    ...item,
     id: makeId(),
-    type: 'square',
-    label: 'Vật cản 1x1',
-    w: 1,
-    h: 1,
-    image: '',
-    rotate: 0,
-  },
-  {
-    id: makeId(),
-    type: 'wide',
-    label: 'Vật cản 2x1',
-    w: 2,
-    h: 1,
-    image: '',
-    rotate: 0,
-  },
-];
-
-function cellsForRect(col: number, row: number, w: number, h: number) {
-  const cells: string[] = [];
-
-  for (let r = row; r < row + h; r++) {
-    for (let c = col; c < col + w; c++) {
-      cells.push(`${c}-${r}`);
-    }
-  }
-
-  return cells;
-}
+  }));
 
 function snapToGrid(value: number, cellSize: number) {
   return Math.round(value / cellSize) * cellSize;
@@ -186,7 +162,11 @@ function getTargetBounds(target: RouteTarget, cellSize: number) {
   };
 }
 
-function getExitPoint(target: RouteTarget, toward: Point, cellSize: number): Point {
+function getExitPoint(
+  target: RouteTarget,
+  toward: Point,
+  cellSize: number,
+): Point {
   const center = getTargetCenter(target, cellSize);
   const bounds = getTargetBounds(target, cellSize);
 
@@ -206,7 +186,11 @@ function getExitPoint(target: RouteTarget, toward: Point, cellSize: number): Poi
   };
 }
 
-function getEntryPoint(target: RouteTarget, from: Point, cellSize: number): Point {
+function getEntryPoint(
+  target: RouteTarget,
+  from: Point,
+  cellSize: number,
+): Point {
   const center = getTargetCenter(target, cellSize);
   const bounds = getTargetBounds(target, cellSize);
 
@@ -248,26 +232,15 @@ function normalizeOrthogonal(points: Point[]) {
 
 function refreshRouteTargets(
   routeTargets: RouteTarget[],
-  player: Cell,
-  obstacles: Obstacle[]
+  obstacles: Obstacle[],
 ): RouteTarget[] {
   return routeTargets
     .map((target) => {
-      if (target.kind === 'player') {
-        return {
-          ...target,
-          col: player.col,
-          row: player.row,
-          w: 1,
-          h: 1,
-        };
-      }
-
       const obstacle = obstacles.find((o) => o.id === target.id);
       if (!obstacle) return null;
 
       return {
-        kind: 'obstacle' as const,
+        kind: "obstacle" as const,
         id: obstacle.id,
         label: obstacle.label,
         col: obstacle.col,
@@ -279,7 +252,10 @@ function refreshRouteTargets(
     .filter(Boolean) as RouteTarget[];
 }
 
-function buildDefaultSections(targets: RouteTarget[], cellSize: number): RouteSection[] {
+function buildDefaultSections(
+  targets: RouteTarget[],
+  cellSize: number,
+): RouteSection[] {
   const sections: RouteSection[] = [];
 
   for (let i = 0; i < targets.length - 1; i++) {
@@ -295,13 +271,13 @@ function buildDefaultSections(targets: RouteTarget[], cellSize: number): RouteSe
     if (dx >= dy) {
       sections.push({
         id: makeId(),
-        axis: 'y',
+        axis: "y",
         lane: currentCenter.y,
       });
     } else {
       sections.push({
         id: makeId(),
-        axis: 'x',
+        axis: "x",
         lane: currentCenter.x,
       });
     }
@@ -314,19 +290,15 @@ function buildSectionPoints(
   fromTarget: RouteTarget,
   toTarget: RouteTarget,
   section: RouteSection,
-  cellSize: number
+  cellSize: number,
 ): Point[] {
   const fromCenter = getTargetCenter(fromTarget, cellSize);
   const toCenter = getTargetCenter(toTarget, cellSize);
 
-  const start =
-    fromTarget.kind === 'player'
-      ? fromCenter
-      : getExitPoint(fromTarget, toCenter, cellSize);
-
+  const start = getExitPoint(fromTarget, toCenter, cellSize);
   const end = getEntryPoint(toTarget, fromCenter, cellSize);
 
-  if (section.axis === 'x') {
+  if (section.axis === "x") {
     return normalizeOrthogonal([
       start,
       { x: section.lane, y: start.y },
@@ -346,14 +318,19 @@ function buildSectionPoints(
 function buildRoutePoints(
   targets: RouteTarget[],
   sections: RouteSection[],
-  cellSize: number
+  cellSize: number,
 ): Point[] {
   if (targets.length < 2) return [];
 
   const all: Point[] = [];
 
   for (let i = 0; i < targets.length - 1; i++) {
-    const pairPoints = buildSectionPoints(targets[i], targets[i + 1], sections[i], cellSize);
+    const pairPoints = buildSectionPoints(
+      targets[i],
+      targets[i + 1],
+      sections[i],
+      cellSize,
+    );
 
     if (all.length === 0) {
       all.push(...pairPoints);
@@ -373,17 +350,21 @@ function buildRoutePoints(
 }
 
 function pointsToSvg(points: Point[]) {
-  return points.map((p) => `${p.x},${p.y}`).join(' ');
+  return points.map((p) => `${p.x},${p.y}`).join(" ");
+}
+
+function getLineDash(style: LineStyle) {
+  return style === "dashed" ? "10 8" : undefined;
 }
 
 function clampLane(
-  axis: 'x' | 'y',
+  axis: "x" | "y",
   lane: number,
   gridCols: number,
   gridRows: number,
-  cellSize: number
+  cellSize: number,
 ) {
-  if (axis === 'x') {
+  if (axis === "x") {
     return Math.max(0, Math.min(lane, gridCols * cellSize));
   }
 
@@ -408,7 +389,7 @@ function MenuSection({
   children,
 }: MenuSectionProps) {
   return (
-    <div className={`panel accordion-panel ${isOpen ? 'accordion-open' : ''}`}>
+    <div className={`panel accordion-panel ${isOpen ? "accordion-open" : ""}`}>
       <button
         type="button"
         className="accordion-header"
@@ -418,7 +399,7 @@ function MenuSection({
 
         <span className="accordion-right">
           {badge && <span className="accordion-badge">{badge}</span>}
-          <span className="accordion-arrow">{isOpen ? '▲' : '▼'}</span>
+          <span className="accordion-arrow">{isOpen ? "▲" : "▼"}</span>
         </span>
       </button>
 
@@ -434,33 +415,37 @@ export default function App() {
   const [gridRows, setGridRows] = useState(8);
   const [cellSize, setCellSize] = useState(60);
 
-  const [player, setPlayer] = useState<Cell>({ col: 1, row: 3 });
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
-  const [customLabel, setCustomLabel] = useState('Vật cản mới');
+  const [customLabel, setCustomLabel] = useState("Vật cản mới");
   const [customWidth, setCustomWidth] = useState(1);
   const [customHeight, setCustomHeight] = useState(1);
-  const [customImage, setCustomImage] = useState('');
+  const [customImage, setCustomImage] = useState("");
   const [customRotate, setCustomRotate] = useState(0);
 
   const [routeMode, setRouteMode] = useState(false);
   const [draftRoute, setDraftRoute] = useState<RouteTarget[]>([]);
-  const [routeName, setRouteName] = useState('Tuyến di chuyển');
+  const [routeName, setRouteName] = useState("Tuyến di chuyển");
   const [routes, setRoutes] = useState<RouteLine[]>([]);
+  const [routeColor, setRouteColor] = useState("#0f172a");
+  const [routeWidth, setRouteWidth] = useState(3);
+  const [routeStyle, setRouteStyle] = useState<LineStyle>("dashed");
 
   const [freeDrawMode, setFreeDrawMode] = useState(false);
   const [freeLines, setFreeLines] = useState<FreeLine[]>([]);
   const [draftFreeLine, setDraftFreeLine] = useState<Point[]>([]);
   const [isDrawingFreeLine, setIsDrawingFreeLine] = useState(false);
-  const [freeLineColor, setFreeLineColor] = useState('#f97316');
-  const [freeLineWidth, setFreeLineWidth] = useState(4);
+  const [freeLineColor, setFreeLineColor] = useState("#f97316");
+  const [freeLineWidth, setFreeLineWidth] = useState(2);
+  const [freeLineStyle, setFreeLineStyle] = useState<LineStyle>("solid");
 
   const [dragLane, setDragLane] = useState<DragLaneState>(null);
   const [isBoardDragging, setIsBoardDragging] = useState(false);
+  const [leftPanelCollapsed, setLeftPanelCollapsed] = useState(false);
+  const [rightPanelCollapsed, setRightPanelCollapsed] = useState(false);
 
   const [openMenus, setOpenMenus] = useState<Record<MenuKey, boolean>>({
     board: true,
-    player: false,
     objects: true,
     edit: false,
     file: false,
@@ -468,36 +453,40 @@ export default function App() {
     route: false,
   });
 
-  const [availableObjects, setAvailableObjects] = useState<PaletteItem[]>(
-    createDefaultObjects
-  );
-
-  const [obstacles, setObstacles] = useState<Obstacle[]>([
-    {
-      id: makeId(),
-      type: 'square',
-      label: 'Vật thể A',
-      col: 4,
-      row: 2,
-      w: 1,
-      h: 1,
-      image: '',
-      rotate: 0,
-    },
-    {
-      id: makeId(),
-      type: 'wide',
-      label: 'Vật thể B',
-      col: 9,
-      row: 6,
-      w: 2,
-      h: 1,
-      image: '',
-      rotate: 0,
-    },
-  ]);
+  const [availableObjects, setAvailableObjects] =
+    useState<PaletteItem[]>(createDefaultObjects);
+  const [objectSearchKeyword, setObjectSearchKeyword] = useState("");
+  const [obstacles, setObstacles] = useState<Obstacle[]>([]);
 
   const selectedObstacle = obstacles.find((o) => o.id === selectedId) || null;
+
+  const placedObjectLegends = useMemo(() => {
+    const legendMap = new Map<string, Obstacle>();
+
+    obstacles.forEach((item) => {
+      const key = item.label.trim().toLowerCase() || item.id;
+
+      if (!legendMap.has(key)) {
+        legendMap.set(key, item);
+      }
+    });
+
+    return Array.from(legendMap.values()).sort((a, b) =>
+      a.label.localeCompare(b.label, "vi"),
+    );
+  }, [obstacles]);
+
+  const filteredAvailableObjects = useMemo(() => {
+    const keyword = objectSearchKeyword.trim().toLowerCase();
+
+    if (!keyword) {
+      return availableObjects;
+    }
+
+    return availableObjects.filter((item) =>
+      item.label.toLowerCase().includes(keyword),
+    );
+  }, [availableObjects, objectSearchKeyword]);
 
   const toggleMenu = (key: MenuKey) => {
     setOpenMenus((prev) => ({
@@ -520,13 +509,16 @@ export default function App() {
     return Math.max(0, Math.min(next, 360));
   };
 
-  const readImageFile = (file: File | undefined, callback: (image: string) => void) => {
+  const readImageFile = (
+    file: File | undefined,
+    callback: (image: string) => void,
+  ) => {
     if (!file) return;
 
     const reader = new FileReader();
 
     reader.onload = () => {
-      if (typeof reader.result === 'string') {
+      if (typeof reader.result === "string") {
         callback(reader.result);
       }
     };
@@ -537,20 +529,20 @@ export default function App() {
   const addCustomObjectToLibrary = () => {
     const next: PaletteItem = {
       id: makeId(),
-      type: 'custom',
-      label: customLabel.trim() || 'Vật cản mới',
+      type: "custom",
+      label: customLabel.trim() || "Vật cản mới",
       w: Math.min(Math.max(customWidth, 1), 4),
       h: Math.min(Math.max(customHeight, 1), 4),
-      image: customImage || '',
+      image: customImage || "",
       rotate: normalizeRotate(customRotate),
     };
 
     setAvailableObjects((prev) => [...prev, next]);
 
-    setCustomLabel('Vật cản mới');
+    setCustomLabel("Vật cản mới");
     setCustomWidth(1);
     setCustomHeight(1);
-    setCustomImage('');
+    setCustomImage("");
     setCustomRotate(0);
 
     setOpenMenus((prev) => ({
@@ -561,14 +553,13 @@ export default function App() {
 
   const removeObjectFromLibrary = (id: string) => {
     setAvailableObjects((prev) => {
-      const index = prev.findIndex((item) => item.id === id);
+      const item = prev.find((object) => object.id === id);
 
-      // Giữ lại 2 vật thể mặc định đầu tiên, chỉ cho xóa vật thể tự thêm
-      if (index >= 0 && index < 2) {
+      if (item?.locked) {
         return prev;
       }
 
-      return prev.filter((item) => item.id !== id);
+      return prev.filter((object) => object.id !== id);
     });
   };
 
@@ -576,7 +567,7 @@ export default function App() {
     if (!selectedId) return;
 
     setObstacles((prev) =>
-      prev.map((o) => (o.id === selectedId ? { ...o, ...patch } : o))
+      prev.map((o) => (o.id === selectedId ? { ...o, ...patch } : o)),
     );
 
     if (patch.label !== undefined) {
@@ -584,25 +575,25 @@ export default function App() {
         prev.map((route) => ({
           ...route,
           targets: route.targets.map((target) =>
-            target.kind === 'obstacle' && target.id === selectedId
+            target.id === selectedId
               ? {
                   ...target,
-                  label: patch.label || 'Vật cản',
+                  label: patch.label || "Vật cản",
                 }
-              : target
+              : target,
           ),
-        }))
+        })),
       );
 
       setDraftRoute((prev) =>
         prev.map((target) =>
-          target.kind === 'obstacle' && target.id === selectedId
+          target.id === selectedId
             ? {
                 ...target,
-                label: patch.label || 'Vật cản',
+                label: patch.label || "Vật cản",
               }
-            : target
-        )
+            : target,
+        ),
       );
     }
   };
@@ -615,8 +606,8 @@ export default function App() {
               ...item,
               rotate: ((item.rotate || 0) + 15) % 360,
             }
-          : item
-      )
+          : item,
+      ),
     );
   };
 
@@ -624,20 +615,10 @@ export default function App() {
     return col >= 0 && row >= 0 && col + w <= gridCols && row + h <= gridRows;
   };
 
-  const occupied = useMemo(() => {
-    const set = new Set<string>();
-
-    obstacles.forEach((o) => {
-      cellsForRect(o.col, o.row, o.w, o.h).forEach((key) => set.add(key));
-    });
-
-    return set;
-  }, [obstacles]);
-
   const renderedRoutes = useMemo(() => {
     return routes
       .map((route) => {
-        const refreshedTargets = refreshRouteTargets(route.targets, player, obstacles);
+        const refreshedTargets = refreshRouteTargets(route.targets, obstacles);
         if (refreshedTargets.length < 2) return null;
 
         const sections =
@@ -655,18 +636,10 @@ export default function App() {
         };
       })
       .filter(Boolean) as Array<RouteLine & { points: Point[] }>;
-  }, [routes, player, obstacles, cellSize]);
+  }, [routes, obstacles, cellSize]);
 
   const canPlaceObstacle = (next: Obstacle, ignoreId?: string) => {
     if (!isInsideBoard(next.col, next.row, next.w, next.h)) return false;
-
-    const playerHit =
-      player.col >= next.col &&
-      player.col < next.col + next.w &&
-      player.row >= next.row &&
-      player.row < next.row + next.h;
-
-    if (playerHit) return false;
 
     return !obstacles.some((o) => {
       if (o.id === ignoreId) return false;
@@ -676,11 +649,6 @@ export default function App() {
 
       return overlapX && overlapY;
     });
-  };
-
-  const canMovePlayer = (col: number, row: number) => {
-    if (!isInsideBoard(col, row)) return false;
-    return !occupied.has(`${col}-${row}`);
   };
 
   const getDropCell = (clientX: number, clientY: number) => {
@@ -698,7 +666,10 @@ export default function App() {
     return { col, row };
   };
 
-  const getBoardPointFromClient = (clientX: number, clientY: number): Point | null => {
+  const getBoardPointFromClient = (
+    clientX: number,
+    clientY: number,
+  ): Point | null => {
     const rect = boardRef.current?.getBoundingClientRect();
     if (!rect) return null;
 
@@ -711,12 +682,14 @@ export default function App() {
   const shouldIgnoreFreeDrawTarget = (target: EventTarget | null) => {
     if (!(target instanceof Element)) return false;
 
-    return Boolean(
-      target.closest('.obstacle, .player-piece, .route-drag-handle, .route-drag-hit')
-    );
+    return Boolean(target.closest(".route-drag-handle, .route-drag-hit"));
   };
 
-  const startFreeDraw = (clientX: number, clientY: number, target: EventTarget | null) => {
+  const startFreeDraw = (
+    clientX: number,
+    clientY: number,
+    target: EventTarget | null,
+  ) => {
     if (!freeDrawMode || routeMode) return;
     if (shouldIgnoreFreeDrawTarget(target)) return;
 
@@ -736,7 +709,11 @@ export default function App() {
     setDraftFreeLine((prev) => {
       const last = prev[prev.length - 1];
 
-      if (last && Math.abs(last.x - point.x) < 2 && Math.abs(last.y - point.y) < 2) {
+      if (
+        last &&
+        Math.abs(last.x - point.x) < 2 &&
+        Math.abs(last.y - point.y) < 2
+      ) {
         return prev;
       }
 
@@ -758,6 +735,7 @@ export default function App() {
             points: prev,
             color: freeLineColor,
             width: freeLineWidth,
+            style: freeLineStyle,
           },
         ]);
       }
@@ -766,7 +744,25 @@ export default function App() {
     });
   };
 
+  const clearSelectedWhenClickBoard = (target: EventTarget | null) => {
+    if (!(target instanceof Element)) return;
+
+    const clickedOnObject = target.closest(
+      ".obstacle, .route-drag-handle, .route-drag-hit",
+    );
+
+    if (clickedOnObject) return;
+
+    setSelectedId(null);
+
+    setOpenMenus((prev) => ({
+      ...prev,
+      edit: false,
+    }));
+  };
+
   const handleFreeDrawMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
+    clearSelectedWhenClickBoard(e.target);
     startFreeDraw(e.clientX, e.clientY, e.target);
   };
 
@@ -806,10 +802,10 @@ export default function App() {
 
   const downloadJsonFile = (fileName: string, data: unknown) => {
     const json = JSON.stringify(data, null, 2);
-    const blob = new Blob([json], { type: 'application/json' });
+    const blob = new Blob([json], { type: "application/json" });
     const url = URL.createObjectURL(blob);
 
-    const link = document.createElement('a');
+    const link = document.createElement("a");
     link.href = url;
     link.download = fileName;
     document.body.appendChild(link);
@@ -821,83 +817,88 @@ export default function App() {
 
   const normalizeImportedObstacle = (
     item: Partial<Obstacle>,
-    keepId = false
+    keepId = false,
   ): Obstacle | null => {
     if (
-      typeof item.label !== 'string' ||
-      typeof item.col !== 'number' ||
-      typeof item.row !== 'number' ||
-      typeof item.w !== 'number' ||
-      typeof item.h !== 'number'
+      typeof item.label !== "string" ||
+      typeof item.col !== "number" ||
+      typeof item.row !== "number" ||
+      typeof item.w !== "number" ||
+      typeof item.h !== "number"
     ) {
       return null;
     }
 
     const type: ObstacleType =
-      item.type === 'square' || item.type === 'wide' || item.type === 'custom'
+      item.type === "square" ||
+      item.type === "wide" ||
+      item.type === "custom" ||
+      item.type === "player"
         ? item.type
-        : 'custom';
+        : "custom";
 
     return {
       id: keepId && item.id ? item.id : makeId(),
       type,
-      label: item.label || 'Vật thể',
+      label: item.label || (type === "player" ? "Người chơi" : "Vật thể"),
       col: item.col,
       row: item.row,
       w: item.w,
       h: item.h,
-      image:
-        typeof item.image === 'string' && item.image.startsWith('data:image')
-          ? item.image
-          : '',
+      image: typeof item.image === "string" ? item.image : "",
       rotate: normalizeRotate(item.rotate || 0),
     };
   };
 
   const exportObstacleGroup = () => {
     const data: ExportObstacleGroupFile & {
-      imageMode: 'base64-in-json';
+      imageMode: "base64-in-json";
       imageCount: number;
     } = {
-      fileType: 'obstacle-group',
+      fileType: "obstacle-group",
       version: 1,
       exportedAt: new Date().toISOString(),
-      imageMode: 'base64-in-json',
+      imageMode: "base64-in-json",
       imageCount: obstacles.filter((item) => Boolean(item.image)).length,
       obstacles: obstacles.map((item) => ({
         ...item,
-        image: item.image || '',
+        image: item.image || "",
       })),
     };
 
-    downloadJsonFile(`cum-vat-the-co-anh-${new Date().toISOString().slice(0, 10)}.json`, data);
+    downloadJsonFile(
+      `cum-vat-the-co-anh-${new Date().toISOString().slice(0, 10)}.json`,
+      data,
+    );
   };
 
   const exportFullField = () => {
     const data: ExportFullFieldFile & {
-      imageMode: 'base64-in-json';
+      imageMode: "base64-in-json";
       imageCount: number;
     } = {
-      fileType: 'full-field',
+      fileType: "full-field",
       version: 1,
       exportedAt: new Date().toISOString(),
-      imageMode: 'base64-in-json',
+      imageMode: "base64-in-json",
       imageCount: obstacles.filter((item) => Boolean(item.image)).length,
       grid: {
         cols: gridCols,
         rows: gridRows,
         cellSize,
       },
-      player,
       obstacles: obstacles.map((item) => ({
         ...item,
-        image: item.image || '',
+        image: item.image || "",
       })),
       routes,
       freeLines,
     };
 
-    downloadJsonFile(`toan-bo-san-co-anh-${new Date().toISOString().slice(0, 10)}.json`, data);
+    downloadJsonFile(
+      `toan-bo-san-co-anh-${new Date().toISOString().slice(0, 10)}.json`,
+      data,
+    );
   };
 
   const importObstacleGroup = (file: File | undefined) => {
@@ -907,12 +908,17 @@ export default function App() {
 
     reader.onload = () => {
       try {
-        if (typeof reader.result !== 'string') return;
+        if (typeof reader.result !== "string") return;
 
-        const parsed = JSON.parse(reader.result) as Partial<ExportObstacleGroupFile>;
+        const parsed = JSON.parse(
+          reader.result,
+        ) as Partial<ExportObstacleGroupFile>;
 
-        if (parsed.fileType !== 'obstacle-group' || !Array.isArray(parsed.obstacles)) {
-          alert('File này không phải file cụm vật thể.');
+        if (
+          parsed.fileType !== "obstacle-group" ||
+          !Array.isArray(parsed.obstacles)
+        ) {
+          alert("File này không phải file cụm vật thể.");
           return;
         }
 
@@ -921,7 +927,7 @@ export default function App() {
           .filter(Boolean) as Obstacle[];
 
         const validObstacles = importedObstacles.filter((item) =>
-          isInsideBoard(item.col, item.row, item.w, item.h)
+          isInsideBoard(item.col, item.row, item.w, item.h),
         );
 
         setObstacles((prev) => [...prev, ...validObstacles]);
@@ -932,11 +938,71 @@ export default function App() {
           edit: false,
         }));
       } catch (error) {
-        alert('Không thể nhập cụm vật thể. Vui lòng chọn đúng file JSON đã xuất.');
+        alert(
+          "Không thể nhập cụm vật thể. Vui lòng chọn đúng file JSON đã xuất.",
+        );
       }
     };
 
     reader.readAsText(file);
+  };
+
+  const normalizeImportedRoutes = (
+    importedRoutes: unknown,
+    playerIdFromOldFile?: string,
+  ): RouteLine[] => {
+    if (!Array.isArray(importedRoutes)) return [];
+
+    return importedRoutes
+      .map((route) => {
+        const item = route as Partial<RouteLine>;
+
+        if (!item.id || !item.name || !Array.isArray(item.targets)) return null;
+
+        const targets = item.targets
+          .map((target) => {
+            const rawTarget = target as ImportedRouteTarget;
+
+            if (rawTarget.kind === "player" && playerIdFromOldFile) {
+              return {
+                kind: "obstacle" as const,
+                id: playerIdFromOldFile,
+                label: rawTarget.label || "Người chơi",
+                col: rawTarget.col,
+                row: rawTarget.row,
+                w: rawTarget.w || 1,
+                h: rawTarget.h || 1,
+              };
+            }
+
+            if (!rawTarget.id) return null;
+
+            return {
+              kind: "obstacle" as const,
+              id: rawTarget.id,
+              label: rawTarget.label || "Vật thể",
+              col: rawTarget.col,
+              row: rawTarget.row,
+              w: rawTarget.w || 1,
+              h: rawTarget.h || 1,
+            };
+          })
+          .filter(Boolean) as RouteTarget[];
+
+        return {
+          id: item.id,
+          name: item.name,
+          targets,
+          sections: Array.isArray(item.sections) ? item.sections : [],
+          color: typeof item.color === "string" ? item.color : "#0f172a",
+          width: typeof item.width === "number" ? item.width : 3,
+          style:
+            item.style === "solid" || item.style === "dashed"
+              ? item.style
+              : "dashed",
+        };
+      })
+      .filter(Boolean) as RouteLine[];
   };
 
   const importFullField = (file: File | undefined) => {
@@ -946,49 +1012,93 @@ export default function App() {
 
     reader.onload = () => {
       try {
-        if (typeof reader.result !== 'string') return;
+        if (typeof reader.result !== "string") return;
 
-        const parsed = JSON.parse(reader.result) as Partial<ExportFullFieldFile>;
+        const parsed = JSON.parse(
+          reader.result,
+        ) as Partial<ExportFullFieldFile>;
 
         if (
-          parsed.fileType !== 'full-field' ||
+          parsed.fileType !== "full-field" ||
           !parsed.grid ||
-          !parsed.player ||
           !Array.isArray(parsed.obstacles)
         ) {
-          alert('File này không phải file toàn bộ sân.');
+          alert("File này không phải file toàn bộ sân.");
           return;
         }
 
         const nextCols = Math.min(Math.max(parsed.grid.cols || 12, 4), 20);
         const nextRows = Math.min(Math.max(parsed.grid.rows || 8, 4), 14);
-        const nextCellSize = Math.min(Math.max(parsed.grid.cellSize || 60, 40), 90);
+        const nextCellSize = Math.min(
+          Math.max(parsed.grid.cellSize || 60, 40),
+          90,
+        );
 
         const importedObstacles = parsed.obstacles
           .map((item) => normalizeImportedObstacle(item, true))
           .filter(Boolean) as Obstacle[];
+
+        let playerIdFromOldFile: string | undefined;
+
+        if (
+          parsed.player &&
+          typeof parsed.player.col === "number" &&
+          typeof parsed.player.row === "number"
+        ) {
+          const oldPlayerObstacle: Obstacle = {
+            id: makeId(),
+            type: "player",
+            label: "Người chơi 1",
+            col: Math.max(0, Math.min(parsed.player.col || 0, nextCols - 1)),
+            row: Math.max(0, Math.min(parsed.player.row || 0, nextRows - 1)),
+            w: 1,
+            h: 1,
+            image: "",
+            rotate: 0,
+          };
+
+          playerIdFromOldFile = oldPlayerObstacle.id;
+
+          const hasPlayerAtOldPosition = importedObstacles.some(
+            (item) =>
+              item.type === "player" &&
+              item.col === oldPlayerObstacle.col &&
+              item.row === oldPlayerObstacle.row,
+          );
+
+          if (!hasPlayerAtOldPosition) {
+            importedObstacles.unshift(oldPlayerObstacle);
+          }
+        }
 
         const validObstacles = importedObstacles.filter(
           (item) =>
             item.col >= 0 &&
             item.row >= 0 &&
             item.col + item.w <= nextCols &&
-            item.row + item.h <= nextRows
+            item.row + item.h <= nextRows,
         );
-
-        const nextPlayer: Cell = {
-          col: Math.max(0, Math.min(parsed.player.col || 0, nextCols - 1)),
-          row: Math.max(0, Math.min(parsed.player.row || 0, nextRows - 1)),
-        };
 
         setGridCols(nextCols);
         setGridRows(nextRows);
         setCellSize(nextCellSize);
-        setPlayer(nextPlayer);
         setObstacles(validObstacles);
 
-        setRoutes(Array.isArray(parsed.routes) ? parsed.routes : []);
-        setFreeLines(Array.isArray(parsed.freeLines) ? parsed.freeLines : []);
+        setRoutes(normalizeImportedRoutes(parsed.routes, playerIdFromOldFile));
+
+        setFreeLines(
+          Array.isArray(parsed.freeLines)
+            ? parsed.freeLines.map((line) => ({
+                ...line,
+                color: line.color || "#f97316",
+                width: line.width || 2,
+                style:
+                  line.style === "solid" || line.style === "dashed"
+                    ? line.style
+                    : "solid",
+              }))
+            : [],
+        );
 
         setSelectedId(null);
         setDraftRoute([]);
@@ -1003,7 +1113,9 @@ export default function App() {
           edit: false,
         }));
       } catch (error) {
-        alert('Không thể nhập toàn bộ sân. Vui lòng chọn đúng file JSON đã xuất.');
+        alert(
+          "Không thể nhập toàn bộ sân. Vui lòng chọn đúng file JSON đã xuất.",
+        );
       }
     };
 
@@ -1011,17 +1123,12 @@ export default function App() {
   };
 
   const sanitizeBoard = (nextCols: number, nextRows: number) => {
-    setPlayer((prev) => ({
-      col: Math.max(0, Math.min(prev.col, nextCols - 1)),
-      row: Math.max(0, Math.min(prev.row, nextRows - 1)),
-    }));
-
     setObstacles((prev) =>
-      prev.filter((o) => o.col + o.w <= nextCols && o.row + o.h <= nextRows)
+      prev.filter((o) => o.col + o.w <= nextCols && o.row + o.h <= nextRows),
     );
 
     setDraftRoute((prev) =>
-      prev.filter((t) => t.col + t.w <= nextCols && t.row + t.h <= nextRows)
+      prev.filter((t) => t.col + t.w <= nextCols && t.row + t.h <= nextRows),
     );
   };
 
@@ -1047,7 +1154,7 @@ export default function App() {
           ...section,
           lane: snapToGrid(section.lane, next),
         })),
-      }))
+      })),
     );
 
     setCellSize(next);
@@ -1071,7 +1178,7 @@ export default function App() {
     e.preventDefault();
     setIsBoardDragging(false);
 
-    const raw = e.dataTransfer.getData('application/json');
+    const raw = e.dataTransfer.getData("application/json");
     if (!raw) return;
 
     const cell = getDropCell(e.clientX, e.clientY);
@@ -1079,24 +1186,19 @@ export default function App() {
 
     const data = JSON.parse(raw);
 
-    if (data.kind === 'player') {
-      if (canMovePlayer(cell.col, cell.row)) {
-        setPlayer(cell);
-      }
-
-      return;
-    }
-
-    if (data.kind === 'palette-obstacle') {
+    if (data.kind === "palette-obstacle") {
       const next: Obstacle = {
         id: makeId(),
         type: data.type,
-        label: data.label,
+        label:
+          data.type === "player"
+            ? `Người chơi ${obstacles.filter((item) => item.type === "player").length + 1}`
+            : data.label,
         col: cell.col,
         row: cell.row,
         w: data.w,
         h: data.h,
-        image: data.image || '',
+        image: data.image || "",
         rotate: normalizeRotate(data.rotate || 0),
       };
 
@@ -1107,14 +1209,16 @@ export default function App() {
       return;
     }
 
-    if (data.kind === 'move-obstacle') {
+    if (data.kind === "move-obstacle") {
       const current = obstacles.find((o) => o.id === data.id);
       if (!current) return;
 
       const next = { ...current, col: cell.col, row: cell.row };
 
       if (canPlaceObstacle(next, current.id)) {
-        setObstacles((prev) => prev.map((o) => (o.id === current.id ? next : o)));
+        setObstacles((prev) =>
+          prev.map((o) => (o.id === current.id ? next : o)),
+        );
       }
     }
   };
@@ -1124,27 +1228,15 @@ export default function App() {
 
     setDraftRoute((prev) => {
       const last = prev[prev.length - 1];
-      if (last && last.kind === target.kind && last.id === target.id) return prev;
+      if (last && last.id === target.id) return prev;
 
       return [...prev, target];
     });
   };
 
-  const handleAddPlayerToRoute = () => {
-    handleAddRouteTarget({
-      kind: 'player',
-      id: 'player',
-      label: 'Player',
-      col: player.col,
-      row: player.row,
-      w: 1,
-      h: 1,
-    });
-  };
-
   const handleAddObstacleToRoute = (o: Obstacle) => {
     handleAddRouteTarget({
-      kind: 'obstacle',
+      kind: "obstacle",
       id: o.id,
       label: o.label,
       col: o.col,
@@ -1164,6 +1256,9 @@ export default function App() {
         name: routeName.trim() || `Tuyến ${prev.length + 1}`,
         targets: draftRoute,
         sections: buildDefaultSections(draftRoute, cellSize),
+        color: routeColor,
+        width: routeWidth,
+        style: routeStyle,
       },
     ]);
 
@@ -1175,8 +1270,8 @@ export default function App() {
     e: React.MouseEvent,
     routeId: string,
     sectionId: string,
-    axis: 'x' | 'y',
-    lane: number
+    axis: "x" | "y",
+    lane: number,
   ) => {
     e.preventDefault();
     e.stopPropagation();
@@ -1196,7 +1291,7 @@ export default function App() {
 
     const handleMouseMove = (e: MouseEvent) => {
       const delta =
-        dragLane.axis === 'x'
+        dragLane.axis === "x"
           ? e.clientX - dragLane.startClientX
           : e.clientY - dragLane.startClientY;
 
@@ -1206,7 +1301,7 @@ export default function App() {
         dragLane.originalLane + snapped,
         gridCols,
         gridRows,
-        cellSize
+        cellSize,
       );
 
       setRoutes((prev) =>
@@ -1216,10 +1311,12 @@ export default function App() {
           return {
             ...route,
             sections: route.sections.map((section) =>
-              section.id === dragLane.sectionId ? { ...section, lane: nextLane } : section
+              section.id === dragLane.sectionId
+                ? { ...section, lane: nextLane }
+                : section,
             ),
           };
-        })
+        }),
       );
     };
 
@@ -1227,12 +1324,12 @@ export default function App() {
       setDragLane(null);
     };
 
-    window.addEventListener('mousemove', handleMouseMove);
-    window.addEventListener('mouseup', handleMouseUp);
+    window.addEventListener("mousemove", handleMouseMove);
+    window.addEventListener("mouseup", handleMouseUp);
 
     return () => {
-      window.removeEventListener('mousemove', handleMouseMove);
-      window.removeEventListener('mouseup', handleMouseUp);
+      window.removeEventListener("mousemove", handleMouseMove);
+      window.removeEventListener("mouseup", handleMouseUp);
     };
   }, [dragLane, cellSize, gridCols, gridRows]);
 
@@ -1240,23 +1337,27 @@ export default function App() {
     setGridCols(12);
     setGridRows(8);
     setCellSize(60);
-    setPlayer({ col: 1, row: 3 });
     setSelectedId(null);
     setRouteMode(false);
     setDraftRoute([]);
-    setRouteName('Tuyến di chuyển');
+    setRouteName("Tuyến di chuyển");
     setRoutes([]);
     setDragLane(null);
-    setCustomImage('');
+    setCustomImage("");
     setCustomRotate(0);
     setAvailableObjects(createDefaultObjects());
+    setObjectSearchKeyword("");
 
     setFreeDrawMode(false);
     setFreeLines([]);
     setDraftFreeLine([]);
     setIsDrawingFreeLine(false);
-    setFreeLineColor('#f97316');
-    setFreeLineWidth(4);
+    setFreeLineColor("#f97316");
+    setFreeLineWidth(2);
+    setFreeLineStyle("solid");
+    setRouteColor("#0f172a");
+    setRouteWidth(3);
+    setRouteStyle("dashed");
 
     setOpenMenus((prev) => ({
       ...prev,
@@ -1265,43 +1366,37 @@ export default function App() {
       objects: true,
     }));
 
-    setObstacles([
-      {
-        id: makeId(),
-        type: 'square',
-        label: 'Vật thể A',
-        col: 4,
-        row: 2,
-        w: 1,
-        h: 1,
-        image: '',
-        rotate: 0,
-      },
-      {
-        id: makeId(),
-        type: 'wide',
-        label: 'Vật thể B',
-        col: 9,
-        row: 6,
-        w: 2,
-        h: 1,
-        image: '',
-        rotate: 0,
-      },
-    ]);
+    setObstacles([]);
   };
 
-  const draftSections = draftRoute.length >= 2 ? buildDefaultSections(draftRoute, cellSize) : [];
+  const draftSections =
+    draftRoute.length >= 2 ? buildDefaultSections(draftRoute, cellSize) : [];
 
   const draftPoints =
-    draftRoute.length >= 2 ? buildRoutePoints(draftRoute, draftSections, cellSize) : [];
+    draftRoute.length >= 2
+      ? buildRoutePoints(draftRoute, draftSections, cellSize)
+      : [];
 
   const draftPolyline = pointsToSvg(draftPoints);
 
   return (
     <div className="field-page">
-      <div className="field-layout">
-        <div className="sidebar">
+      <div
+        className={`field-layout ${leftPanelCollapsed ? "left-collapsed" : ""} ${
+          rightPanelCollapsed ? "right-collapsed" : ""
+        }`}
+      >
+        <div
+          className={`sidebar side-panel left-sidebar ${leftPanelCollapsed ? "side-collapsed" : ""}`}
+        >
+          <button
+            type="button"
+            className="side-collapse-btn left-collapse-btn"
+            onClick={() => setLeftPanelCollapsed((prev) => !prev)}
+            title={leftPanelCollapsed ? "Mở menu trái" : "Thu nhỏ menu trái"}
+          >
+            {leftPanelCollapsed ? "›" : "‹"}
+          </button>
           <MenuSection
             id="board"
             title="Chỉnh ô sân"
@@ -1349,80 +1444,89 @@ export default function App() {
           </MenuSection>
 
           <MenuSection
-            id="player"
-            title="Người chơi"
-            isOpen={openMenus.player}
-            onToggle={toggleMenu}
-          >
-            <div
-              className="drag-card player-card"
-              draggable={!freeDrawMode}
-              onDragEnd={() => setIsBoardDragging(false)}
-              onDragStart={(e) => {
-                e.dataTransfer.setData('application/json', JSON.stringify({ kind: 'player' }));
-              }}
-            >
-              <div className="drag-icon">👤</div>
-              <div>
-                <div className="drag-title">Người</div>
-                <div className="drag-subtitle">Kéo vào sân</div>
-              </div>
-            </div>
-          </MenuSection>
-
-          <MenuSection
             id="objects"
             title="Vật thể"
             badge={`${availableObjects.length}`}
             isOpen={openMenus.objects}
             onToggle={toggleMenu}
           >
-            <div className="object-library">
-              <div className="route-list-title">Danh sách vật thể</div>
+<div className="object-library">
+  <div className="route-list-title">Danh sách vật thể</div>
 
-              <div className="card-list">
-                {availableObjects.map((item, index) => (
+  <div className="object-search-box">
+    <input
+      className="form-input object-search-input"
+      value={objectSearchKeyword}
+      onChange={(e) => setObjectSearchKeyword(e.target.value)}
+      placeholder="Tìm vật thể..."
+    />
+
+    {objectSearchKeyword && (
+      <button
+        type="button"
+        className="object-search-clear"
+        onClick={() => setObjectSearchKeyword("")}
+      >
+        ×
+      </button>
+    )}
+  </div>
+
+  <div className="card-list">
+    {filteredAvailableObjects.map((item) => (
                   <div
                     key={item.id}
-                    className="drag-card object-card"
+                    className={`drag-card object-card ${
+                      item.type === "player" ? "player-card" : ""
+                    }`}
                     draggable={!freeDrawMode}
                     onDragEnd={() => setIsBoardDragging(false)}
                     onDragStart={(e) => {
                       const target = e.target as HTMLElement;
 
-                      if (target.closest('.object-delete-btn')) {
+                      if (target.closest(".object-delete-btn")) {
                         e.preventDefault();
                         return;
                       }
 
                       e.dataTransfer.setData(
-                        'application/json',
+                        "application/json",
                         JSON.stringify({
-                          kind: 'palette-obstacle',
+                          kind: "palette-obstacle",
                           type: item.type,
                           label: item.label,
                           w: item.w,
                           h: item.h,
-                          image: item.image || '',
+                          image: item.image || "",
                           rotate: item.rotate || 0,
-                        })
+                        }),
                       );
                     }}
                   >
                     {item.image ? (
-                      <img className="object-thumb" src={item.image} alt={item.label} />
+                      <img
+                        className="object-thumb"
+                        src={item.image}
+                        alt={item.label}
+                      />
+                    ) : item.type === "player" ? (
+                      <div className="drag-icon">👤</div>
                     ) : (
-                      <div className="drag-icon">{item.w === 1 ? '⬜' : '▭'}</div>
+                      <div className="drag-icon">
+                        {item.w === 1 ? "⬜" : "▭"}
+                      </div>
                     )}
 
                     <div className="object-info">
                       <div className="drag-title">{item.label}</div>
                       <div className="drag-subtitle">
-                        {item.w} x {item.h} ô · xoay {item.rotate || 0}°
+                        {item.type === "player"
+                          ? "Kéo vào sân nhiều lần để thêm nhiều người"
+                          : `${item.w} x ${item.h} ô · xoay ${item.rotate || 0}°`}
                       </div>
                     </div>
 
-                    {index >= 2 && (
+                    {!item.locked && (
                       <button
                         type="button"
                         className="object-delete-btn"
@@ -1442,7 +1546,11 @@ export default function App() {
                       </button>
                     )}
                   </div>
-                ))}
+                ))}{filteredAvailableObjects.length === 0 && (
+  <div className="object-empty-search">
+    Không tìm thấy vật thể phù hợp.
+  </div>
+)}
               </div>
             </div>
 
@@ -1465,7 +1573,9 @@ export default function App() {
                     min={1}
                     max={4}
                     value={customWidth}
-                    onChange={(e) => setCustomWidth(Number(e.target.value) || 1)}
+                    onChange={(e) =>
+                      setCustomWidth(Number(e.target.value) || 1)
+                    }
                   />
                 </div>
 
@@ -1477,7 +1587,9 @@ export default function App() {
                     min={1}
                     max={4}
                     value={customHeight}
-                    onChange={(e) => setCustomHeight(Number(e.target.value) || 1)}
+                    onChange={(e) =>
+                      setCustomHeight(Number(e.target.value) || 1)
+                    }
                   />
                 </div>
               </div>
@@ -1500,7 +1612,7 @@ export default function App() {
                   <button
                     type="button"
                     className="btn btn-gray compact-btn"
-                    onClick={() => setCustomImage('')}
+                    onClick={() => setCustomImage("")}
                   >
                     Xóa
                   </button>
@@ -1517,7 +1629,9 @@ export default function App() {
                     min={0}
                     max={360}
                     value={customRotate}
-                    onChange={(e) => setCustomRotate(normalizeRotate(Number(e.target.value)))}
+                    onChange={(e) =>
+                      setCustomRotate(normalizeRotate(Number(e.target.value)))
+                    }
                   />
 
                   <input
@@ -1526,7 +1640,9 @@ export default function App() {
                     min={0}
                     max={360}
                     value={customRotate}
-                    onChange={(e) => setCustomRotate(normalizeRotate(Number(e.target.value)))}
+                    onChange={(e) =>
+                      setCustomRotate(normalizeRotate(Number(e.target.value)))
+                    }
                   />
                 </div>
               </div>
@@ -1540,7 +1656,484 @@ export default function App() {
               </button>
             </div>
           </MenuSection>
+        </div>
 
+        <div
+          className="board-wrapper"
+          onMouseDown={(e) => {
+            const target = e.target as HTMLElement;
+
+            if (
+              target.closest(
+                ".obstacle, .football-board, .route-drag-handle, .route-drag-hit",
+              )
+            ) {
+              return;
+            }
+
+            setSelectedId(null);
+
+            setOpenMenus((prev) => ({
+              ...prev,
+              edit: false,
+            }));
+          }}
+        >
+          <div className="board-header">
+            <div>
+              <h2 className="board-title">Sân mô phỏng</h2>
+              <p className="board-subtitle">
+                Lưới {gridCols} x {gridRows} ô
+              </p>
+            </div>
+
+            {selectedObstacle && (
+              <div className="selected-box">
+                Đang chọn: <strong>{selectedObstacle.label}</strong> (
+                {selectedObstacle.w}x{selectedObstacle.h})
+              </div>
+            )}
+          </div>
+
+          <div
+            ref={boardRef}
+            className={`football-board ${isBoardDragging ? "football-board-show-grid" : ""} ${
+              freeDrawMode ? "football-board-free-draw" : ""
+            }`}
+            onDragOver={handleBoardDragOver}
+            onDragLeave={handleBoardDragLeave}
+            onDrop={handleBoardDrop}
+            onMouseDown={handleFreeDrawMouseDown}
+            onMouseMove={handleFreeDrawMouseMove}
+            onMouseUp={finishFreeDraw}
+            onMouseLeave={() => {
+              finishFreeDraw();
+            }}
+            onTouchStart={handleFreeDrawTouchStart}
+            onTouchMove={handleFreeDrawTouchMove}
+            onTouchEnd={finishFreeDraw}
+            style={{
+              width: gridCols * cellSize,
+              height: gridRows * cellSize,
+              backgroundSize: isBoardDragging
+                ? `${cellSize}px ${cellSize}px, ${cellSize}px ${cellSize}px, auto`
+                : "auto",
+              backgroundRepeat: isBoardDragging
+                ? "repeat, repeat, no-repeat"
+                : "no-repeat",
+            }}
+          >
+            {Array.from({ length: gridRows * gridCols }).map((_, i) => {
+              const col = i % gridCols;
+              const row = Math.floor(i / gridCols);
+
+              return (
+                <div
+                  key={`${col}-${row}`}
+                  className="grid-cell"
+                  style={{
+                    left: col * cellSize,
+                    top: row * cellSize,
+                    width: cellSize,
+                    height: cellSize,
+                  }}
+                />
+              );
+            })}
+
+            <svg
+              className="route-svg"
+              width={gridCols * cellSize}
+              height={gridRows * cellSize}
+              viewBox={`0 0 ${gridCols * cellSize} ${gridRows * cellSize}`}
+            >
+              <defs>
+                <marker
+                  id="route-arrow-dark"
+                  markerWidth="5"
+                  markerHeight="5"
+                  refX="11"
+                  refY="7"
+                  orient="auto"
+                  markerUnits="strokeWidth"
+                >
+                  <path d="M0,0 L10,5 L0,10 Z" fill="#0f172a" />
+                </marker>
+
+                <marker
+                  id="route-arrow-blue"
+                  markerWidth="10"
+                  markerHeight="10"
+                  refX="8"
+                  refY="5"
+                  orient="auto"
+                  markerUnits="strokeWidth"
+                >
+                  <path d="M0,0 L10,5 L0,10 Z" fill="#2563eb" />
+                </marker>
+                <marker
+                  id="free-line-arrow"
+                  markerWidth="22"
+                  markerHeight="22"
+                  refX="8"
+                  refY="5"
+                  orient="auto"
+                  markerUnits="strokeWidth"
+                >
+                  <path d="M0,0 L10,5 L0,10 Z" fill="context-stroke" />
+                </marker>
+              </defs>
+
+              {freeLines.map((line) => (
+                <polyline
+                  key={line.id}
+                  className="free-line"
+                  points={pointsToSvg(line.points)}
+                  fill="none"
+                  stroke={line.color}
+                  strokeWidth={line.width}
+                  strokeDasharray={getLineDash(line.style || "solid")}
+                  strokeLinejoin="round"
+                  strokeLinecap="round"
+                  markerEnd="url(#free-line-arrow)"
+                />
+              ))}
+
+              {draftFreeLine.length >= 2 && (
+                <polyline
+                  className="free-line free-line-draft"
+                  points={pointsToSvg(draftFreeLine)}
+                  fill="none"
+                  stroke={freeLineColor}
+                  strokeWidth={freeLineWidth}
+                  strokeDasharray={getLineDash(freeLineStyle)}
+                  strokeLinejoin="round"
+                  strokeLinecap="round"
+                />
+              )}
+
+              {renderedRoutes.map((route) => {
+                const start = route.points[0];
+
+                return (
+                  <g key={route.id}>
+                    <polyline
+                      points={pointsToSvg(route.points)}
+                      fill="none"
+                      stroke={route.color || "#0f172a"}
+                      strokeWidth={route.width || 4}
+                      strokeLinejoin="round"
+                      strokeLinecap="round"
+                      strokeDasharray={getLineDash(route.style || "dashed")}
+                      markerEnd="url(#route-arrow-dark)"
+                    />
+
+                    {start && (
+                      <circle
+                        cx={start.x}
+                        cy={start.y}
+                        r="6"
+                        fill={route.color || "#0f172a"}
+                      />
+                    )}
+
+                    {route.sections.map((section, index) => {
+                      const fromTarget = route.targets[index];
+                      const toTarget = route.targets[index + 1];
+
+                      if (!fromTarget || !toTarget) return null;
+
+                      const pairPoints = buildSectionPoints(
+                        fromTarget,
+                        toTarget,
+                        section,
+                        cellSize,
+                      );
+                      const p1 = pairPoints[1];
+                      const p2 = pairPoints[2];
+
+                      if (!p1 || !p2) return null;
+
+                      if (section.axis === "x") {
+                        const midX = p1.x;
+                        const midY = (p1.y + p2.y) / 2;
+
+                        return (
+                          <g key={section.id}>
+                            <line
+                              x1={p1.x}
+                              y1={p1.y}
+                              x2={p2.x}
+                              y2={p2.y}
+                              className="route-drag-hit"
+                              onMouseDown={(e) =>
+                                startLaneDrag(
+                                  e,
+                                  route.id,
+                                  section.id,
+                                  "x",
+                                  section.lane,
+                                )
+                              }
+                            />
+
+                            <rect
+                              x={midX - 8}
+                              y={midY - 8}
+                              width="16"
+                              height="16"
+                              rx="4"
+                              className="route-drag-handle"
+                              onMouseDown={(e) =>
+                                startLaneDrag(
+                                  e,
+                                  route.id,
+                                  section.id,
+                                  "x",
+                                  section.lane,
+                                )
+                              }
+                            />
+                          </g>
+                        );
+                      }
+
+                      const midX = (p1.x + p2.x) / 2;
+                      const midY = p1.y;
+
+                      return (
+                        <g key={section.id}>
+                          <line
+                            x1={p1.x}
+                            y1={p1.y}
+                            x2={p2.x}
+                            y2={p2.y}
+                            className="route-drag-hit"
+                            onMouseDown={(e) =>
+                              startLaneDrag(
+                                e,
+                                route.id,
+                                section.id,
+                                "y",
+                                section.lane,
+                              )
+                            }
+                          />
+
+                          <rect
+                            x={midX - 8}
+                            y={midY - 8}
+                            width="16"
+                            height="16"
+                            rx="4"
+                            className="route-drag-handle"
+                            onMouseDown={(e) =>
+                              startLaneDrag(
+                                e,
+                                route.id,
+                                section.id,
+                                "y",
+                                section.lane,
+                              )
+                            }
+                          />
+                        </g>
+                      );
+                    })}
+                  </g>
+                );
+              })}
+
+              {draftPoints.length >= 2 && (
+                <g>
+                  <polyline
+                    points={draftPolyline}
+                    fill="none"
+                    stroke={routeColor}
+                    strokeWidth={routeWidth}
+                    strokeLinejoin="round"
+                    strokeLinecap="round"
+                    strokeDasharray={getLineDash(routeStyle)}
+                    markerEnd="url(#route-arrow-blue)"
+                  />
+
+                  <circle
+                    cx={draftPoints[0].x}
+                    cy={draftPoints[0].y}
+                    r="6"
+                    fill={routeColor}
+                  />
+                </g>
+              )}
+            </svg>
+
+            {obstacles.map((o) => (
+              <div
+                key={o.id}
+               className={`obstacle ${selectedId === o.id ? "obstacle-selected" : ""} ${
+  o.type === "custom" ? "obstacle-custom" : ""
+} ${o.type === "player" ? "player-piece" : ""} ${
+  routeMode ? "route-pickable" : ""
+} ${freeDrawMode ? "free-draw-ignore-object" : ""}`}
+                style={{
+                  left: o.col * cellSize + 4,
+                  top: o.row * cellSize + 4,
+                  width: o.w * cellSize - 8,
+                  height: o.h * cellSize - 8,
+                  transform: `rotate(${o.rotate || 0}deg)`,
+                }}
+                draggable={!routeMode && !freeDrawMode}
+                onDragEnd={() => setIsBoardDragging(false)}
+                onClick={(e) => {
+                  e.stopPropagation();
+
+                  if (routeMode) {
+                    handleAddObstacleToRoute(o);
+                    return;
+                  }
+
+                  if (freeDrawMode) return;
+
+                  setSelectedId(o.id);
+                  setLeftPanelCollapsed(true);
+                  setRightPanelCollapsed(false);
+
+                  setOpenMenus((prev) => ({
+                    ...prev,
+                    edit: true,
+                  }));
+
+                  if (o.type !== "player") {
+                    rotateObstacleByClick(o.id);
+                  }
+                }}
+                onDragStart={(e) => {
+                  e.stopPropagation();
+
+                  if (routeMode || freeDrawMode) return;
+
+                  setSelectedId(o.id);
+
+                  e.dataTransfer.setData(
+                    "application/json",
+                    JSON.stringify({
+                      kind: "move-obstacle",
+                      id: o.id,
+                    }),
+                  );
+                }}
+              >
+                {o.image ? (
+                  <img className="obstacle-image" src={o.image} alt={o.label} />
+                ) : o.type === "player" ? (
+                  <span className="obstacle-label">👤</span>
+                ) : (
+                  <span className="obstacle-label">{o.label}</span>
+                )}
+              </div>
+            ))}
+          </div>
+
+          {placedObjectLegends.length > 0 && (
+            <div
+              className="field-object-legend"
+              style={{
+                width: gridCols * cellSize,
+                maxWidth: "100%",
+                marginTop: 14,
+                padding: "12px 14px",
+                border: "1px solid #e2e8f0",
+                borderRadius: 16,
+                background: "#ffffff",
+                boxShadow: "0 4px 14px rgba(15, 23, 42, 0.06)",
+              }}
+            >
+              <div
+                className="field-object-legend-title"
+                style={{
+                  marginBottom: 10,
+                  fontSize: 13,
+                  fontWeight: 800,
+                  color: "#0f172a",
+                }}
+              >
+                Ghi chú vật thể
+              </div>
+
+              <div
+                className="field-object-legend-list"
+                style={{
+                  display: "flex",
+                  flexWrap: "wrap",
+                  gap: 10,
+                }}
+              >
+                {placedObjectLegends.map((item) => (
+                  <div
+                    key={`${item.type}-${item.label}`}
+                    className="field-object-legend-item"
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 8,
+                      minHeight: 36,
+                      padding: "6px 10px",
+                      border: "1px solid #e5e7eb",
+                      borderRadius: 999,
+                      background: "#f8fafc",
+                      color: "#1f2937",
+                      fontSize: 13,
+                      fontWeight: 700,
+                    }}
+                  >
+                    {item.image ? (
+                      <img
+                        src={item.image}
+                        alt={item.label}
+                        style={{
+                          width: 26,
+                          height: 26,
+                          objectFit: "contain",
+                          flex: "0 0 auto",
+                        }}
+                      />
+                    ) : (
+                      <span
+                        style={{
+                          width: 26,
+                          height: 26,
+                          display: "inline-flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          borderRadius: 8,
+                          background: item.type === "player" ? "#2563eb" : "#e5e7eb",
+                          color: item.type === "player" ? "#ffffff" : "#111827",
+                          fontSize: 16,
+                        }}
+                      >
+                        {item.type === "player" ? "👤" : "⬜"}
+                      </span>
+                    )}
+
+                    <span>{item.label}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div
+          className={`sidebar side-panel right-sidebar ${rightPanelCollapsed ? "side-collapsed" : ""}`}
+        >
+          <button
+            type="button"
+            className="side-collapse-btn right-collapse-btn"
+            onClick={() => setRightPanelCollapsed((prev) => !prev)}
+            title={rightPanelCollapsed ? "Mở menu phải" : "Thu nhỏ menu phải"}
+          >
+            {rightPanelCollapsed ? "‹" : "›"}
+          </button>
           {selectedObstacle && (
             <MenuSection
               id="edit"
@@ -1550,7 +2143,8 @@ export default function App() {
               onToggle={toggleMenu}
             >
               <div className="selected-edit-name">
-                {selectedObstacle.label} ({selectedObstacle.w}x{selectedObstacle.h})
+                {selectedObstacle.label} ({selectedObstacle.w}x
+                {selectedObstacle.h})
               </div>
 
               <div className="compact-field">
@@ -1583,11 +2177,14 @@ export default function App() {
 
               {selectedObstacle.image && (
                 <div className="image-preview compact-preview">
-                  <img src={selectedObstacle.image} alt={selectedObstacle.label} />
+                  <img
+                    src={selectedObstacle.image}
+                    alt={selectedObstacle.label}
+                  />
                   <button
                     type="button"
                     className="btn btn-gray compact-btn"
-                    onClick={() => updateSelectedObstacle({ image: '' })}
+                    onClick={() => updateSelectedObstacle({ image: "" })}
                   >
                     Xóa
                   </button>
@@ -1595,7 +2192,9 @@ export default function App() {
               )}
 
               <div className="rotate-control compact-rotate">
-                <label className="input-label">Xoay: {selectedObstacle.rotate || 0}°</label>
+                <label className="input-label">
+                  Xoay: {selectedObstacle.rotate || 0}°
+                </label>
 
                 <div className="rotate-inline">
                   <input
@@ -1628,69 +2227,72 @@ export default function App() {
             </MenuSection>
           )}
 
-          <MenuSection
-            id="file"
-            title="Xuất / Nhập file"
-            badge={`${obstacles.length}`}
-            isOpen={openMenus.file}
-            onToggle={toggleMenu}
-          >
-            <div className="file-tool-box">
-              <div className="route-list-title">1. Cụm vật thể</div>
+<div style={{ display: "none" }}>
+  <MenuSection
+    id="file"
+    title="Xuất / Nhập file"
+    badge={`${obstacles.length}`}
+    isOpen={openMenus.file}
+    onToggle={toggleMenu}
+  >
+    <div className="file-tool-box">
+      <div className="route-list-title">1. Cụm vật thể</div>
 
-              <div className="button-row">
-                <button
-                  className="btn btn-green"
-                  onClick={exportObstacleGroup}
-                  disabled={obstacles.length === 0}
-                >
-                  Xuất cụm
-                </button>
+      <div className="button-row">
+        <button
+          className="btn btn-green"
+          onClick={exportObstacleGroup}
+          disabled={obstacles.length === 0}
+        >
+          Xuất cụm
+        </button>
 
-                <label className="btn btn-blue import-file-btn">
-                  Nhập cụm
-                  <input
-                    type="file"
-                    accept="application/json,.json"
-                    onChange={(e) => {
-                      importObstacleGroup(e.target.files?.[0]);
-                      e.target.value = '';
-                    }}
-                  />
-                </label>
-              </div>
+        <label className="btn btn-blue import-file-btn">
+          Nhập cụm
+          <input
+            type="file"
+            accept="application/json,.json"
+            onChange={(e) => {
+              importObstacleGroup(e.target.files?.[0]);
+              e.target.value = "";
+            }}
+          />
+        </label>
+      </div>
 
-              <div className="route-empty import-note">
-                Nhập cụm sẽ thêm vật thể vào sân hiện tại, không xóa vật thể đang có.
-              </div>
-            </div>
+      <div className="route-empty import-note">
+        Nhập cụm sẽ thêm vật thể vào sân hiện tại, không xóa vật thể đang có.
+      </div>
+    </div>
 
-            <div className="file-tool-box">
-              <div className="route-list-title">2. Toàn bộ sân</div>
+    <div className="file-tool-box">
+      <div className="route-list-title">2. Toàn bộ sân</div>
 
-              <div className="button-row">
-                <button className="btn btn-green" onClick={exportFullField}>
-                  Xuất sân
-                </button>
+      <div className="button-row">
+        <button className="btn btn-green" onClick={exportFullField}>
+          Xuất sân
+        </button>
 
-                <label className="btn btn-blue import-file-btn">
-                  Nhập sân
-                  <input
-                    type="file"
-                    accept="application/json,.json"
-                    onChange={(e) => {
-                      importFullField(e.target.files?.[0]);
-                      e.target.value = '';
-                    }}
-                  />
-                </label>
-              </div>
+        <label className="btn btn-blue import-file-btn">
+          Nhập sân
+          <input
+            type="file"
+            accept="application/json,.json"
+            onChange={(e) => {
+              importFullField(e.target.files?.[0]);
+              e.target.value = "";
+            }}
+          />
+        </label>
+      </div>
 
-              <div className="route-empty import-note">
-                Nhập sân sẽ khôi phục nguyên sân cũ, gồm vật thể, ảnh, người chơi, line theo ô và line tự do.
-              </div>
-            </div>
-          </MenuSection>
+      <div className="route-empty import-note">
+        Nhập sân sẽ khôi phục nguyên sân cũ, gồm vật thể, ảnh, line theo ô và
+        line tự do.
+      </div>
+    </div>
+  </MenuSection>
+</div>
 
           <MenuSection
             id="freeLine"
@@ -1701,7 +2303,7 @@ export default function App() {
           >
             <div className="button-row">
               <button
-                className={`btn ${freeDrawMode ? 'btn-blue' : 'btn-dark'}`}
+                className={`btn ${freeDrawMode ? "btn-blue" : "btn-dark"}`}
                 onClick={() => {
                   setFreeDrawMode((prev) => !prev);
                   setRouteMode(false);
@@ -1709,7 +2311,7 @@ export default function App() {
                   setIsDrawingFreeLine(false);
                 }}
               >
-                {freeDrawMode ? 'Đang vẽ' : 'Bật vẽ'}
+                {freeDrawMode ? "Đang vẽ" : "Bật vẽ"}
               </button>
 
               <button
@@ -1751,13 +2353,29 @@ export default function App() {
                   max={20}
                   value={freeLineWidth}
                   onChange={(e) =>
-                    setFreeLineWidth(Math.min(Math.max(Number(e.target.value) || 1, 1), 20))
+                    setFreeLineWidth(
+                      Math.min(Math.max(Number(e.target.value) || 1, 1), 20),
+                    )
                   }
                 />
               </div>
             </div>
 
-            <div className="route-empty">Bật vẽ rồi kéo chuột hoặc vuốt trên sân để vẽ.</div>
+            <div className="compact-field">
+              <label className="input-label">Kiểu nét</label>
+              <select
+                className="form-input"
+                value={freeLineStyle}
+                onChange={(e) => setFreeLineStyle(e.target.value as LineStyle)}
+              >
+                <option value="solid">Liền mạch</option>
+                <option value="dashed">Nét đứt</option>
+              </select>
+            </div>
+
+            <div className="route-empty">
+              Bật vẽ rồi kéo chuột hoặc vuốt trên sân để vẽ.
+            </div>
           </MenuSection>
 
           <MenuSection
@@ -1774,9 +2392,49 @@ export default function App() {
               placeholder="Tên tuyến"
             />
 
+            <div className="input-row free-line-control">
+              <div>
+                <label className="input-label">Màu</label>
+                <input
+                  className="form-input color-input"
+                  type="color"
+                  value={routeColor}
+                  onChange={(e) => setRouteColor(e.target.value)}
+                />
+              </div>
+
+              <div>
+                <label className="input-label">Độ dày</label>
+                <input
+                  className="form-input"
+                  type="number"
+                  min={1}
+                  max={20}
+                  value={routeWidth}
+                  onChange={(e) =>
+                    setRouteWidth(
+                      Math.min(Math.max(Number(e.target.value) || 1, 1), 20),
+                    )
+                  }
+                />
+              </div>
+            </div>
+
+            <div className="compact-field">
+              <label className="input-label">Kiểu nét</label>
+              <select
+                className="form-input"
+                value={routeStyle}
+                onChange={(e) => setRouteStyle(e.target.value as LineStyle)}
+              >
+                <option value="solid">Liền mạch</option>
+                <option value="dashed">Nét đứt</option>
+              </select>
+            </div>
+
             <div className="button-row">
               <button
-                className={`btn ${routeMode ? 'btn-blue' : 'btn-dark'}`}
+                className={`btn ${routeMode ? "btn-blue" : "btn-dark"}`}
                 onClick={() => {
                   setRouteMode((prev) => !prev);
                   setFreeDrawMode(false);
@@ -1785,7 +2443,7 @@ export default function App() {
                   setDraftRoute([]);
                 }}
               >
-                {routeMode ? 'Đang chọn' : 'Bật vẽ'}
+                {routeMode ? "Đang chọn" : "Bật vẽ"}
               </button>
 
               <button
@@ -1798,7 +2456,11 @@ export default function App() {
             </div>
 
             <div className="button-row route-button-row">
-              <button className="btn btn-green" onClick={saveRoute} disabled={draftRoute.length < 2}>
+              <button
+                className="btn btn-green"
+                onClick={saveRoute}
+                disabled={draftRoute.length < 2}
+              >
                 Lưu
               </button>
 
@@ -1818,7 +2480,10 @@ export default function App() {
                 <div className="route-empty">Chưa có điểm</div>
               ) : (
                 draftRoute.map((item, index) => (
-                  <div key={`${item.kind}-${item.id}-${index}`} className="route-chip">
+                  <div
+                    key={`${item.kind}-${item.id}-${index}`}
+                    className="route-chip"
+                  >
                     {index + 1}. {item.label}
                   </div>
                 ))
@@ -1835,7 +2500,7 @@ export default function App() {
                   <div key={route.id} className="saved-route-item">
                     <div className="saved-route-name">{route.name}</div>
                     <div className="saved-route-path">
-                      {route.targets.map((t) => t.label).join(' -> ')}
+                      {route.targets.map((t) => t.label).join(" -> ")}
                     </div>
                   </div>
                 ))
@@ -1855,6 +2520,19 @@ export default function App() {
                 if (!selectedId) return;
 
                 setObstacles((prev) => prev.filter((o) => o.id !== selectedId));
+                setRoutes((prev) =>
+                  prev
+                    .map((route) => ({
+                      ...route,
+                      targets: route.targets.filter(
+                        (target) => target.id !== selectedId,
+                      ),
+                    }))
+                    .filter((route) => route.targets.length >= 2),
+                );
+                setDraftRoute((prev) =>
+                  prev.filter((target) => target.id !== selectedId),
+                );
                 setSelectedId(null);
 
                 setOpenMenus((prev) => ({
@@ -1865,312 +2543,6 @@ export default function App() {
             >
               Xóa chọn
             </button>
-          </div>
-        </div>
-
-        <div className="board-wrapper">
-          <div className="board-header">
-            <div>
-              <h2 className="board-title">Sân mô phỏng</h2>
-              <p className="board-subtitle">
-                Lưới {gridCols} x {gridRows} ô
-              </p>
-            </div>
-
-            {selectedObstacle && (
-              <div className="selected-box">
-                Đang chọn: <strong>{selectedObstacle.label}</strong> ({selectedObstacle.w}x
-                {selectedObstacle.h})
-              </div>
-            )}
-          </div>
-
-          <div
-            ref={boardRef}
-            className={`football-board ${isBoardDragging ? 'football-board-show-grid' : ''} ${
-              freeDrawMode ? 'football-board-free-draw' : ''
-            }`}
-            onDragOver={handleBoardDragOver}
-            onDragLeave={handleBoardDragLeave}
-            onDrop={handleBoardDrop}
-            onMouseDown={handleFreeDrawMouseDown}
-            onMouseMove={handleFreeDrawMouseMove}
-            onMouseUp={finishFreeDraw}
-            onMouseLeave={() => {
-              finishFreeDraw();
-            }}
-            onTouchStart={handleFreeDrawTouchStart}
-            onTouchMove={handleFreeDrawTouchMove}
-            onTouchEnd={finishFreeDraw}
-            style={{
-              width: gridCols * cellSize,
-              height: gridRows * cellSize,
-              backgroundSize: isBoardDragging
-                ? `${cellSize}px ${cellSize}px, ${cellSize}px ${cellSize}px, auto`
-                : 'auto',
-              backgroundRepeat: isBoardDragging ? 'repeat, repeat, no-repeat' : 'no-repeat',
-            }}
-          >
-            {Array.from({ length: gridRows * gridCols }).map((_, i) => {
-              const col = i % gridCols;
-              const row = Math.floor(i / gridCols);
-
-              return (
-                <div
-                  key={`${col}-${row}`}
-                  className="grid-cell"
-                  style={{
-                    left: col * cellSize,
-                    top: row * cellSize,
-                    width: cellSize,
-                    height: cellSize,
-                  }}
-                />
-              );
-            })}
-
-            <svg
-              className="route-svg"
-              width={gridCols * cellSize}
-              height={gridRows * cellSize}
-              viewBox={`0 0 ${gridCols * cellSize} ${gridRows * cellSize}`}
-            >
-              <defs>
-                <marker
-                  id="route-arrow-dark"
-                  markerWidth="10"
-                  markerHeight="10"
-                  refX="8"
-                  refY="5"
-                  orient="auto"
-                  markerUnits="strokeWidth"
-                >
-                  <path d="M0,0 L10,5 L0,10 Z" fill="#0f172a" />
-                </marker>
-
-                <marker
-                  id="route-arrow-blue"
-                  markerWidth="10"
-                  markerHeight="10"
-                  refX="8"
-                  refY="5"
-                  orient="auto"
-                  markerUnits="strokeWidth"
-                >
-                  <path d="M0,0 L10,5 L0,10 Z" fill="#2563eb" />
-                </marker>
-              </defs>
-
-              {freeLines.map((line) => (
-                <polyline
-                  key={line.id}
-                  className="free-line"
-                  points={pointsToSvg(line.points)}
-                  fill="none"
-                  stroke={line.color}
-                  strokeWidth={line.width}
-                  strokeLinejoin="round"
-                  strokeLinecap="round"
-                />
-              ))}
-
-              {draftFreeLine.length >= 2 && (
-                <polyline
-                  className="free-line free-line-draft"
-                  points={pointsToSvg(draftFreeLine)}
-                  fill="none"
-                  stroke={freeLineColor}
-                  strokeWidth={freeLineWidth}
-                  strokeLinejoin="round"
-                  strokeLinecap="round"
-                />
-              )}
-
-              {renderedRoutes.map((route) => {
-                const start = route.points[0];
-
-                return (
-                  <g key={route.id}>
-                    <polyline
-                      points={pointsToSvg(route.points)}
-                      fill="none"
-                      stroke="#0f172a"
-                      strokeWidth="4"
-                      strokeLinejoin="round"
-                      strokeLinecap="round"
-                      strokeDasharray="2 10"
-                      markerEnd="url(#route-arrow-dark)"
-                    />
-
-                    {start && <circle cx={start.x} cy={start.y} r="6" fill="#0f172a" />}
-
-                    {route.sections.map((section, index) => {
-                      const fromTarget = route.targets[index];
-                      const toTarget = route.targets[index + 1];
-
-                      if (!fromTarget || !toTarget) return null;
-
-                      const pairPoints = buildSectionPoints(fromTarget, toTarget, section, cellSize);
-                      const p1 = pairPoints[1];
-                      const p2 = pairPoints[2];
-
-                      if (!p1 || !p2) return null;
-
-                      if (section.axis === 'x') {
-                        const midX = p1.x;
-                        const midY = (p1.y + p2.y) / 2;
-
-                        return (
-                          <g key={section.id}>
-                            <line
-                              x1={p1.x}
-                              y1={p1.y}
-                              x2={p2.x}
-                              y2={p2.y}
-                              className="route-drag-hit"
-                              onMouseDown={(e) =>
-                                startLaneDrag(e, route.id, section.id, 'x', section.lane)
-                              }
-                            />
-
-                            <rect
-                              x={midX - 8}
-                              y={midY - 8}
-                              width="16"
-                              height="16"
-                              rx="4"
-                              className="route-drag-handle"
-                              onMouseDown={(e) =>
-                                startLaneDrag(e, route.id, section.id, 'x', section.lane)
-                              }
-                            />
-                          </g>
-                        );
-                      }
-
-                      const midX = (p1.x + p2.x) / 2;
-                      const midY = p1.y;
-
-                      return (
-                        <g key={section.id}>
-                          <line
-                            x1={p1.x}
-                            y1={p1.y}
-                            x2={p2.x}
-                            y2={p2.y}
-                            className="route-drag-hit"
-                            onMouseDown={(e) =>
-                              startLaneDrag(e, route.id, section.id, 'y', section.lane)
-                            }
-                          />
-
-                          <rect
-                            x={midX - 8}
-                            y={midY - 8}
-                            width="16"
-                            height="16"
-                            rx="4"
-                            className="route-drag-handle"
-                            onMouseDown={(e) =>
-                              startLaneDrag(e, route.id, section.id, 'y', section.lane)
-                            }
-                          />
-                        </g>
-                      );
-                    })}
-                  </g>
-                );
-              })}
-
-              {draftPoints.length >= 2 && (
-                <g>
-                  <polyline
-                    points={draftPolyline}
-                    fill="none"
-                    stroke="#2563eb"
-                    strokeWidth="4"
-                    strokeLinejoin="round"
-                    strokeLinecap="round"
-                    strokeDasharray="10 8"
-                    markerEnd="url(#route-arrow-blue)"
-                  />
-
-                  <circle cx={draftPoints[0].x} cy={draftPoints[0].y} r="6" fill="#2563eb" />
-                </g>
-              )}
-            </svg>
-
-            {obstacles.map((o) => (
-              <div
-                key={o.id}
-                className={`obstacle ${selectedId === o.id ? 'obstacle-selected' : ''} ${
-                  o.type === 'custom' ? 'obstacle-custom' : ''
-                } ${routeMode ? 'route-pickable' : ''}`}
-                style={{
-                  left: o.col * cellSize + 4,
-                  top: o.row * cellSize + 4,
-                  width: o.w * cellSize - 8,
-                  height: o.h * cellSize - 8,
-                  transform: `rotate(${o.rotate || 0}deg)`,
-                }}
-                draggable={!routeMode && !freeDrawMode}
-                onDragEnd={() => setIsBoardDragging(false)}
-                onClick={() => {
-                  if (routeMode) {
-                    handleAddObstacleToRoute(o);
-                    return;
-                  }
-
-                  if (freeDrawMode) return;
-
-                  setSelectedId(o.id);
-                  rotateObstacleByClick(o.id);
-                }}
-                onDragStart={(e) => {
-                  if (routeMode || freeDrawMode) return;
-
-                  setSelectedId(o.id);
-
-                  e.dataTransfer.setData(
-                    'application/json',
-                    JSON.stringify({
-                      kind: 'move-obstacle',
-                      id: o.id,
-                    })
-                  );
-                }}
-              >
-                {o.image ? (
-                  <img className="obstacle-image" src={o.image} alt={o.label} />
-                ) : (
-                  <span className="obstacle-label">{o.label}</span>
-                )}
-              </div>
-            ))}
-
-            <div
-              className={`player-piece ${routeMode ? 'route-pickable-player' : ''}`}
-              style={{
-                left: player.col * cellSize + 8,
-                top: player.row * cellSize + 8,
-                width: cellSize - 16,
-                height: cellSize - 16,
-              }}
-              draggable={!routeMode && !freeDrawMode}
-              onDragEnd={() => setIsBoardDragging(false)}
-              onClick={() => {
-                if (routeMode) {
-                  handleAddPlayerToRoute();
-                }
-              }}
-              onDragStart={(e) => {
-                if (routeMode || freeDrawMode) return;
-
-                e.dataTransfer.setData('application/json', JSON.stringify({ kind: 'player' }));
-              }}
-            >
-              👤
-            </div>
           </div>
         </div>
       </div>

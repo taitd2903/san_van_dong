@@ -63,6 +63,9 @@ body {
   display: flex;
   flex-direction: column;
   gap: 8px;
+    max-height: 420px;
+  overflow-y: auto;
+  padding-right: 4px;
 }
 
 .drag-card {
@@ -372,10 +375,6 @@ body {
   font-size: 12px;
   font-weight: 700;
   color: #111827;
-  background: rgba(255, 255, 255, 0.94);
-  border: 1px solid rgba(255, 255, 255, 0.7);
-  border-radius: 16px;
-  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.18);
   cursor: grab;
   user-select: none;
   overflow: hidden;
@@ -386,9 +385,6 @@ body {
   cursor: grabbing;
 }
 
-.obstacle-custom {
-  background: rgba(251, 191, 36, 0.96);
-}
 
 .obstacle-selected {
   outline: 4px solid rgba(253, 224, 71, 0.6);
@@ -419,9 +415,9 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: #2563eb;
-  color: white;
-  border: 2px solid #bfdbfe;
+
+
+
   border-radius: 16px;
   box-shadow: 0 6px 16px rgba(0, 0, 0, 0.2);
   font-size: 24px;
@@ -810,4 +806,183 @@ body {
   .board-subtitle {
     font-size: 13px;
   }
+}
+/* ===== Split left/right panels + centered board ===== */
+.field-layout {
+  width: 100%;
+  max-width: 1680px;
+  min-height: calc(100vh - 36px);
+  margin: 0 auto;
+  display: grid;
+  grid-template-columns: 320px minmax(0, 1fr) 320px;
+  gap: 18px;
+  align-items: start;
+}
+
+.field-layout.left-collapsed {
+  grid-template-columns: 44px minmax(0, 1fr) 320px;
+}
+
+.field-layout.right-collapsed {
+  grid-template-columns: 320px minmax(0, 1fr) 44px;
+}
+
+.field-layout.left-collapsed.right-collapsed {
+  grid-template-columns: 44px minmax(0, 1fr) 44px;
+}
+
+.side-panel {
+  position: sticky;
+  top: 18px;
+  max-height: calc(100vh - 36px);
+  overflow-y: auto;
+  padding-right: 4px;
+  transition: width 0.18s ease, opacity 0.18s ease;
+}
+
+.side-panel::-webkit-scrollbar {
+  width: 6px;
+}
+
+.side-panel::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 999px;
+}
+
+.side-collapsed {
+  width: 44px;
+  min-width: 44px;
+  overflow: visible;
+  padding-right: 0;
+}
+
+.side-collapsed > .panel,
+.side-collapsed > .sidebar-actions {
+  display: none;
+}
+
+.side-collapse-btn {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  width: 44px;
+  height: 44px;
+  border: none;
+  border-radius: 14px;
+  background: #111827;
+  color: #ffffff;
+  font-size: 24px;
+  font-weight: 800;
+  cursor: pointer;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.16);
+  flex-shrink: 0;
+}
+
+.left-collapse-btn {
+  margin-left: auto;
+}
+
+.right-collapse-btn {
+  margin-right: auto;
+}
+
+.board-wrapper {
+  background: white;
+  border-radius: 22px;
+  padding: 18px;
+  overflow: auto;
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.06);
+  max-width: 100%;
+  min-height: calc(100vh - 36px);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-x pan-y;
+}
+
+.board-header {
+  width: 100%;
+}
+
+@media (max-width: 1200px) {
+  .field-layout,
+  .field-layout.left-collapsed,
+  .field-layout.right-collapsed,
+  .field-layout.left-collapsed.right-collapsed {
+    grid-template-columns: 1fr;
+  }
+
+  .side-panel {
+    position: relative;
+    top: auto;
+    max-height: none;
+    width: 100%;
+  }
+
+  .side-collapsed {
+    width: 100%;
+    min-width: 100%;
+  }
+
+  .side-collapsed > .panel,
+  .side-collapsed > .sidebar-actions {
+    display: none;
+  }
+
+  .side-collapse-btn {
+    width: 100%;
+    height: 40px;
+    border-radius: 12px;
+  }
+
+  .left-collapse-btn,
+  .right-collapse-btn {
+    margin-left: 0;
+    margin-right: 0;
+  }
+
+  .board-wrapper {
+    min-height: auto;
+  }
+}
+.object-search-box {
+  position: relative;
+  margin-bottom: 8px;
+}
+
+.object-search-input {
+  padding-right: 34px;
+  margin-bottom: 0;
+}
+
+.object-search-clear {
+  position: absolute;
+  top: 20%;
+  right: 7px;
+  width: 24px;
+  height: 24px;
+  border: none;
+  border-radius: 999px;
+  background: #e5e7eb;
+  color: #374151;
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.object-search-clear:hover {
+  background: #d1d5db;
+}
+
+.object-empty-search {
+  padding: 12px;
+  border: 1px dashed #cbd5e1;
+  border-radius: 12px;
+  background: #f8fafc;
+  color: #64748b;
+  font-size: 12px;
+  text-align: center;
+}.football-board-free-draw .obstacle {
+  pointer-events: none !important;
 }
