@@ -152,6 +152,8 @@ function getTargetCenter(target: RouteTarget, cellSize: number): Point {
 }
 
 function getTargetBounds(target: RouteTarget, cellSize: number) {
+  // Giữ điểm đầu/cuối line nằm sát trong vật thể như bản gốc.
+  // Mũi tên sẽ được vẽ bằng overlay riêng phía trên object để không bị che.
   const padding = 10;
 
   return {
@@ -357,6 +359,41 @@ function getLineDash(style: LineStyle) {
   return style === "dashed" ? "10 8" : undefined;
 }
 
+function getRouteArrowHead(points: Point[]) {
+  if (points.length < 2) return null;
+
+  const end = points[points.length - 1];
+  let prev: Point | null = null;
+
+  for (let i = points.length - 2; i >= 0; i--) {
+    const candidate = points[i];
+
+    if (candidate.x !== end.x || candidate.y !== end.y) {
+      prev = candidate;
+      break;
+    }
+  }
+
+  if (!prev) return null;
+
+  const angle =
+    (Math.atan2(end.y - prev.y, end.x - prev.x) * 180) / Math.PI;
+
+  return {
+    x: end.x,
+    y: end.y,
+    angle,
+  };
+}
+
+function getArrowPolygonPoints(width: number) {
+  const length = Math.max(18, Math.min(width * 6, 28));
+  const halfHeight = Math.max(7, Math.min(width * 2.6, 12));
+
+  return `0,0 -${length},-${halfHeight} -${length},${halfHeight}`;
+}
+
+
 function clampLane(
   axis: "x" | "y",
   lane: number,
@@ -422,6 +459,7 @@ export default function App() {
   const [customHeight, setCustomHeight] = useState(1);
   const [customImage, setCustomImage] = useState("");
   const [customRotate, setCustomRotate] = useState(0);
+  const [isCreateObjectOpen, setIsCreateObjectOpen] = useState(false);
 
   const [routeMode, setRouteMode] = useState(false);
   const [draftRoute, setDraftRoute] = useState<RouteTarget[]>([]);
@@ -450,7 +488,7 @@ export default function App() {
     edit: false,
     file: false,
     freeLine: false,
-    route: false,
+    route: true,
   });
 
   const [availableObjects, setAvailableObjects] =
@@ -545,6 +583,8 @@ export default function App() {
     setCustomImage("");
     setCustomRotate(0);
 
+    setIsCreateObjectOpen(false);
+
     setOpenMenus((prev) => ({
       ...prev,
       objects: true,
@@ -577,9 +617,9 @@ export default function App() {
           targets: route.targets.map((target) =>
             target.id === selectedId
               ? {
-                  ...target,
-                  label: patch.label || "Vật cản",
-                }
+                ...target,
+                label: patch.label || "Vật cản",
+              }
               : target,
           ),
         })),
@@ -589,9 +629,9 @@ export default function App() {
         prev.map((target) =>
           target.id === selectedId
             ? {
-                ...target,
-                label: patch.label || "Vật cản",
-              }
+              ...target,
+              label: patch.label || "Vật cản",
+            }
             : target,
         ),
       );
@@ -603,9 +643,9 @@ export default function App() {
       prev.map((item) =>
         item.id === id
           ? {
-              ...item,
-              rotate: ((item.rotate || 0) + 15) % 360,
-            }
+            ...item,
+            rotate: ((item.rotate || 0) + 15) % 360,
+          }
           : item,
       ),
     );
@@ -831,9 +871,9 @@ export default function App() {
 
     const type: ObstacleType =
       item.type === "square" ||
-      item.type === "wide" ||
-      item.type === "custom" ||
-      item.type === "player"
+        item.type === "wide" ||
+        item.type === "custom" ||
+        item.type === "player"
         ? item.type
         : "custom";
 
@@ -1089,14 +1129,14 @@ export default function App() {
         setFreeLines(
           Array.isArray(parsed.freeLines)
             ? parsed.freeLines.map((line) => ({
-                ...line,
-                color: line.color || "#f97316",
-                width: line.width || 2,
-                style:
-                  line.style === "solid" || line.style === "dashed"
-                    ? line.style
-                    : "solid",
-              }))
+              ...line,
+              color: line.color || "#f97316",
+              width: line.width || 2,
+              style:
+                line.style === "solid" || line.style === "dashed"
+                  ? line.style
+                  : "solid",
+            }))
             : [],
         );
 
@@ -1347,6 +1387,7 @@ export default function App() {
     setCustomRotate(0);
     setAvailableObjects(createDefaultObjects());
     setObjectSearchKeyword("");
+    setIsCreateObjectOpen(false);
 
     setFreeDrawMode(false);
     setFreeLines([]);
@@ -1382,9 +1423,8 @@ export default function App() {
   return (
     <div className="field-page">
       <div
-        className={`field-layout ${leftPanelCollapsed ? "left-collapsed" : ""} ${
-          rightPanelCollapsed ? "right-collapsed" : ""
-        }`}
+        className={`field-layout ${leftPanelCollapsed ? "left-collapsed" : ""} ${rightPanelCollapsed ? "right-collapsed" : ""
+          }`}
       >
         <div
           className={`sidebar side-panel left-sidebar ${leftPanelCollapsed ? "side-collapsed" : ""}`}
@@ -1450,35 +1490,47 @@ export default function App() {
             isOpen={openMenus.objects}
             onToggle={toggleMenu}
           >
-<div className="object-library">
-  <div className="route-list-title">Danh sách vật thể</div>
+            <div className="object-library">
+              <div className="object-library-head">
+                <div className="object-library-heading">
+                  <div className="route-list-title">Danh sách vật thể</div>
+                  <div className="object-library-note">Kéo vật thể vào sân để đặt nhanh.</div>
+                </div>
 
-  <div className="object-search-box">
-    <input
-      className="form-input object-search-input"
-      value={objectSearchKeyword}
-      onChange={(e) => setObjectSearchKeyword(e.target.value)}
-      placeholder="Tìm vật thể..."
-    />
+                <button
+                  type="button"
+                  className="btn btn-green object-create-toggle"
+                  onClick={() => setIsCreateObjectOpen(true)}
+                >
+                  + Thêm mới
+                </button>
+              </div>
 
-    {objectSearchKeyword && (
-      <button
-        type="button"
-        className="object-search-clear"
-        onClick={() => setObjectSearchKeyword("")}
-      >
-        ×
-      </button>
-    )}
-  </div>
+              <div className="object-search-box">
+                <input
+                  className="form-input object-search-input"
+                  value={objectSearchKeyword}
+                  onChange={(e) => setObjectSearchKeyword(e.target.value)}
+                  placeholder="Tìm vật thể..."
+                />
 
-  <div className="card-list">
-    {filteredAvailableObjects.map((item) => (
+                {objectSearchKeyword && (
+                  <button
+                    type="button"
+                    className="object-search-clear"
+                    onClick={() => setObjectSearchKeyword("")}
+                  >
+                    ×
+                  </button>
+                )}
+              </div>
+
+              <div className="card-list">
+                {filteredAvailableObjects.map((item) => (
                   <div
                     key={item.id}
-                    className={`drag-card object-card ${
-                      item.type === "player" ? "player-card" : ""
-                    }`}
+                    className={`drag-card object-card ${item.type === "player" ? "player-card" : ""
+                      }`}
                     draggable={!freeDrawMode}
                     onDragEnd={() => setIsBoardDragging(false)}
                     onDragStart={(e) => {
@@ -1547,15 +1599,43 @@ export default function App() {
                     )}
                   </div>
                 ))}{filteredAvailableObjects.length === 0 && (
-  <div className="object-empty-search">
-    Không tìm thấy vật thể phù hợp.
-  </div>
-)}
+                  <div className="object-empty-search">
+                    Không tìm thấy vật thể phù hợp.
+                  </div>
+                )}
               </div>
             </div>
 
-            <div className="object-create-box">
-              <div className="route-list-title">Thêm vật thể mới</div>
+            {isCreateObjectOpen && (
+              <div
+                className="object-modal-backdrop"
+                role="dialog"
+                aria-modal="true"
+                aria-label="Thêm vật thể mới"
+                onMouseDown={() => setIsCreateObjectOpen(false)}
+              >
+                <div
+                  className="object-modal"
+                  onMouseDown={(e) => e.stopPropagation()}
+                >
+                  <div className="object-modal-header">
+                    <div>
+                      <div className="route-list-title object-modal-kicker">Tạo vật thể</div>
+                      <h3 className="object-modal-title">Thêm vật thể mới</h3>
+                    </div>
+
+                    <button
+                      type="button"
+                      className="object-modal-close"
+                      onClick={() => setIsCreateObjectOpen(false)}
+                      aria-label="Đóng form thêm vật thể"
+                    >
+                      ×
+                    </button>
+                  </div>
+
+                  <div className="object-create-box object-create-box-modal">
+                    <div className="route-list-title">Thông tin vật thể</div>
 
               <input
                 className="form-input"
@@ -1654,7 +1734,10 @@ export default function App() {
               >
                 Thêm vào vật thể
               </button>
-            </div>
+                  </div>
+                </div>
+              </div>
+            )}
           </MenuSection>
         </div>
 
@@ -1697,9 +1780,8 @@ export default function App() {
 
           <div
             ref={boardRef}
-            className={`football-board ${isBoardDragging ? "football-board-show-grid" : ""} ${
-              freeDrawMode ? "football-board-free-draw" : ""
-            }`}
+            className={`football-board ${isBoardDragging ? "football-board-show-grid" : ""} ${freeDrawMode ? "football-board-free-draw" : ""
+              }`}
             onDragOver={handleBoardDragOver}
             onDragLeave={handleBoardDragLeave}
             onDrop={handleBoardDrop}
@@ -1750,12 +1832,13 @@ export default function App() {
               <defs>
                 <marker
                   id="route-arrow-dark"
-                  markerWidth="5"
-                  markerHeight="5"
-                  refX="11"
-                  refY="7"
+                  viewBox="0 0 10 10"
+                  markerWidth="28"
+                  markerHeight="28"
+                  refX="9"
+                  refY="5"
                   orient="auto"
-                  markerUnits="strokeWidth"
+                  markerUnits="userSpaceOnUse"
                 >
                   <path d="M0,0 L10,5 L0,10 Z" fill="#0f172a" />
                 </marker>
@@ -1825,7 +1908,6 @@ export default function App() {
                       strokeLinejoin="round"
                       strokeLinecap="round"
                       strokeDasharray={getLineDash(route.style || "dashed")}
-                      markerEnd="url(#route-arrow-dark)"
                     />
 
                     {start && (
@@ -1954,7 +2036,6 @@ export default function App() {
                     strokeLinejoin="round"
                     strokeLinecap="round"
                     strokeDasharray={getLineDash(routeStyle)}
-                    markerEnd="url(#route-arrow-blue)"
                   />
 
                   <circle
@@ -1970,11 +2051,9 @@ export default function App() {
             {obstacles.map((o) => (
               <div
                 key={o.id}
-               className={`obstacle ${selectedId === o.id ? "obstacle-selected" : ""} ${
-  o.type === "custom" ? "obstacle-custom" : ""
-} ${o.type === "player" ? "player-piece" : ""} ${
-  routeMode ? "route-pickable" : ""
-} ${freeDrawMode ? "free-draw-ignore-object" : ""}`}
+                className={`obstacle ${selectedId === o.id ? "obstacle-selected" : ""} ${o.type === "custom" ? "obstacle-custom" : ""
+                  } ${o.type === "player" ? "player-piece" : ""} ${routeMode ? "route-pickable" : ""
+                  } ${freeDrawMode ? "free-draw-ignore-object" : ""}`}
                 style={{
                   left: o.col * cellSize + 4,
                   top: o.row * cellSize + 4,
@@ -2032,6 +2111,57 @@ export default function App() {
                 )}
               </div>
             ))}
+
+            {(renderedRoutes.length > 0 || draftPoints.length >= 2) && (
+              <svg
+                className="route-arrow-overlay"
+                width={gridCols * cellSize}
+                height={gridRows * cellSize}
+                viewBox={`0 0 ${gridCols * cellSize} ${gridRows * cellSize}`}
+              >
+                {renderedRoutes.map((route) => {
+                  const arrow = getRouteArrowHead(route.points);
+                  if (!arrow) return null;
+
+                  const color = route.color || "#0f172a";
+                  const width = route.width || 4;
+
+                  return (
+                    <g
+                      key={`${route.id}-arrow-overlay`}
+                      transform={`translate(${arrow.x} ${arrow.y}) rotate(${arrow.angle})`}
+                    >
+                      <polygon
+                        points={getArrowPolygonPoints(width)}
+                        fill={color}
+                        stroke="#ffffff"
+                        strokeWidth="1.5"
+                        strokeLinejoin="round"
+                      />
+                    </g>
+                  );
+                })}
+
+                {draftPoints.length >= 2 && (() => {
+                  const arrow = getRouteArrowHead(draftPoints);
+                  if (!arrow) return null;
+
+                  return (
+                    <g
+                      transform={`translate(${arrow.x} ${arrow.y}) rotate(${arrow.angle})`}
+                    >
+                      <polygon
+                        points={getArrowPolygonPoints(routeWidth)}
+                        fill={routeColor}
+                        stroke="#ffffff"
+                        strokeWidth="1.5"
+                        strokeLinejoin="round"
+                      />
+                    </g>
+                  );
+                })()}
+              </svg>
+            )}
           </div>
 
           {placedObjectLegends.length > 0 && (
@@ -2227,72 +2357,70 @@ export default function App() {
             </MenuSection>
           )}
 
-<div style={{ display: "none" }}>
-  <MenuSection
-    id="file"
-    title="Xuất / Nhập file"
-    badge={`${obstacles.length}`}
-    isOpen={openMenus.file}
-    onToggle={toggleMenu}
-  >
-    <div className="file-tool-box">
-      <div className="route-list-title">1. Cụm vật thể</div>
+          <MenuSection
+              id="file"
+              title="Xuất / Nhập file"
+              badge={`${obstacles.length}`}
+              isOpen={openMenus.file}
+              onToggle={toggleMenu}
+            >
+              <div className="file-tool-box">
+                <div className="route-list-title">1. Cụm vật thể</div>
 
-      <div className="button-row">
-        <button
-          className="btn btn-green"
-          onClick={exportObstacleGroup}
-          disabled={obstacles.length === 0}
-        >
-          Xuất cụm
-        </button>
+                <div className="button-row">
+                  <button
+                    className="btn btn-green"
+                    onClick={exportObstacleGroup}
+                    disabled={obstacles.length === 0}
+                  >
+                    Xuất cụm
+                  </button>
 
-        <label className="btn btn-blue import-file-btn">
-          Nhập cụm
-          <input
-            type="file"
-            accept="application/json,.json"
-            onChange={(e) => {
-              importObstacleGroup(e.target.files?.[0]);
-              e.target.value = "";
-            }}
-          />
-        </label>
-      </div>
+                  <label className="btn btn-blue import-file-btn">
+                    Nhập cụm
+                    <input
+                      type="file"
+                      accept="application/json,.json"
+                      onChange={(e) => {
+                        importObstacleGroup(e.target.files?.[0]);
+                        e.target.value = "";
+                      }}
+                    />
+                  </label>
+                </div>
 
-      <div className="route-empty import-note">
-        Nhập cụm sẽ thêm vật thể vào sân hiện tại, không xóa vật thể đang có.
-      </div>
-    </div>
+                <div className="route-empty import-note">
+                  Nhập cụm sẽ thêm vật thể vào sân hiện tại, không xóa vật thể đang có.
+                </div>
+              </div>
 
-    <div className="file-tool-box">
-      <div className="route-list-title">2. Toàn bộ sân</div>
+              <div className="file-tool-box">
+                <div className="route-list-title">2. Toàn bộ sân</div>
 
-      <div className="button-row">
-        <button className="btn btn-green" onClick={exportFullField}>
-          Xuất sân
-        </button>
+                <div className="button-row">
+                  <button className="btn btn-green" onClick={exportFullField}>
+                    Xuất sân
+                  </button>
 
-        <label className="btn btn-blue import-file-btn">
-          Nhập sân
-          <input
-            type="file"
-            accept="application/json,.json"
-            onChange={(e) => {
-              importFullField(e.target.files?.[0]);
-              e.target.value = "";
-            }}
-          />
-        </label>
-      </div>
+                  <label className="btn btn-blue import-file-btn">
+                    Nhập sân
+                    <input
+                      type="file"
+                      accept="application/json,.json"
+                      onChange={(e) => {
+                        importFullField(e.target.files?.[0]);
+                        e.target.value = "";
+                      }}
+                    />
+                  </label>
+                </div>
 
-      <div className="route-empty import-note">
-        Nhập sân sẽ khôi phục nguyên sân cũ, gồm vật thể, ảnh, line theo ô và
-        line tự do.
-      </div>
-    </div>
-  </MenuSection>
-</div>
+                <div className="route-empty import-note">
+                  Nhập sân sẽ khôi phục nguyên sân cũ, gồm vật thể, ảnh, line theo ô và
+                  line tự do.
+                </div>
+              </div>
+          </MenuSection>
 
           <MenuSection
             id="freeLine"
