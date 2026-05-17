@@ -84,7 +84,15 @@ type DragLaneState = {
   originalLane: number;
 } | null;
 
-type MenuKey = "board" | "objects" | "edit" | "file" | "freeLine" | "route";
+type MenuKey = "objects" | "edit" | "file" | "freeLine" | "route";
+
+const createMenuState = (openKey: MenuKey | null = null): Record<MenuKey, boolean> => ({
+  objects: openKey === "objects",
+  edit: openKey === "edit",
+  file: openKey === "file",
+  freeLine: openKey === "freeLine",
+  route: openKey === "route",
+});
 
 type FreeLine = {
   id: string;
@@ -482,14 +490,9 @@ export default function App() {
   const [leftPanelCollapsed, setLeftPanelCollapsed] = useState(false);
   const [rightPanelCollapsed, setRightPanelCollapsed] = useState(false);
 
-  const [openMenus, setOpenMenus] = useState<Record<MenuKey, boolean>>({
-    board: true,
-    objects: true,
-    edit: false,
-    file: false,
-    freeLine: false,
-    route: true,
-  });
+  const [openMenus, setOpenMenus] = useState<Record<MenuKey, boolean>>(
+    () => createMenuState("objects"),
+  );
 
   const [availableObjects, setAvailableObjects] =
     useState<PaletteItem[]>(createDefaultObjects);
@@ -527,18 +530,27 @@ export default function App() {
   }, [availableObjects, objectSearchKeyword]);
 
   const toggleMenu = (key: MenuKey) => {
-    setOpenMenus((prev) => ({
-      ...prev,
-      [key]: !prev[key],
-    }));
+    setOpenMenus((prev) => {
+      if (key === "objects") {
+        return {
+          ...prev,
+          objects: !prev.objects,
+        };
+      }
+
+      return {
+        ...createMenuState(prev[key] ? null : key),
+        objects: prev.objects,
+      };
+    });
   };
 
   React.useEffect(() => {
     if (!selectedId) return;
 
     setOpenMenus((prev) => ({
-      ...prev,
-      edit: true,
+      ...createMenuState("edit"),
+      objects: prev.objects,
     }));
   }, [selectedId]);
 
@@ -585,10 +597,7 @@ export default function App() {
 
     setIsCreateObjectOpen(false);
 
-    setOpenMenus((prev) => ({
-      ...prev,
-      objects: true,
-    }));
+    setOpenMenus((prev) => ({ ...prev, objects: true }));
   };
 
   const removeObjectFromLibrary = (id: string) => {
@@ -795,10 +804,7 @@ export default function App() {
 
     setSelectedId(null);
 
-    setOpenMenus((prev) => ({
-      ...prev,
-      edit: false,
-    }));
+    setOpenMenus((prev) => (prev.edit ? { ...createMenuState(null), objects: prev.objects } : prev));
   };
 
   const handleFreeDrawMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
@@ -973,10 +979,7 @@ export default function App() {
         setObstacles((prev) => [...prev, ...validObstacles]);
         setSelectedId(null);
 
-        setOpenMenus((prev) => ({
-          ...prev,
-          edit: false,
-        }));
+        setOpenMenus((prev) => (prev.edit ? { ...createMenuState(null), objects: prev.objects } : prev));
       } catch (error) {
         alert(
           "Không thể nhập cụm vật thể. Vui lòng chọn đúng file JSON đã xuất.",
@@ -1148,10 +1151,7 @@ export default function App() {
         setIsDrawingFreeLine(false);
         setDragLane(null);
 
-        setOpenMenus((prev) => ({
-          ...prev,
-          edit: false,
-        }));
+        setOpenMenus((prev) => (prev.edit ? { ...createMenuState(null), objects: prev.objects } : prev));
       } catch (error) {
         alert(
           "Không thể nhập toàn bộ sân. Vui lòng chọn đúng file JSON đã xuất.",
@@ -1400,12 +1400,7 @@ export default function App() {
     setRouteWidth(3);
     setRouteStyle("dashed");
 
-    setOpenMenus((prev) => ({
-      ...prev,
-      edit: false,
-      freeLine: false,
-      objects: true,
-    }));
+    setOpenMenus({ ...createMenuState(null), objects: true });
 
     setObstacles([]);
   };
@@ -1437,51 +1432,6 @@ export default function App() {
           >
             {leftPanelCollapsed ? "›" : "‹"}
           </button>
-          <MenuSection
-            id="board"
-            title="Chỉnh ô sân"
-            badge={`${gridCols}x${gridRows}`}
-            isOpen={openMenus.board}
-            onToggle={toggleMenu}
-          >
-            <div className="input-row input-row-3">
-              <div>
-                <label className="input-label">Cột</label>
-                <input
-                  className="form-input"
-                  type="number"
-                  min={4}
-                  max={20}
-                  value={gridCols}
-                  onChange={(e) => handleColsChange(Number(e.target.value))}
-                />
-              </div>
-
-              <div>
-                <label className="input-label">Hàng</label>
-                <input
-                  className="form-input"
-                  type="number"
-                  min={4}
-                  max={14}
-                  value={gridRows}
-                  onChange={(e) => handleRowsChange(Number(e.target.value))}
-                />
-              </div>
-
-              <div>
-                <label className="input-label">Ô</label>
-                <input
-                  className="form-input"
-                  type="number"
-                  min={40}
-                  max={90}
-                  value={cellSize}
-                  onChange={(e) => handleCellSizeChange(Number(e.target.value))}
-                />
-              </div>
-            </div>
-          </MenuSection>
 
           <MenuSection
             id="objects"
@@ -1756,18 +1706,55 @@ export default function App() {
 
             setSelectedId(null);
 
-            setOpenMenus((prev) => ({
-              ...prev,
-              edit: false,
-            }));
+            setOpenMenus((prev) => (prev.edit ? { ...createMenuState(null), objects: prev.objects } : prev));
           }}
         >
           <div className="board-header">
-            <div>
+            <div className="board-title-group">
               <h2 className="board-title">Sân mô phỏng</h2>
-              <p className="board-subtitle">
-                Lưới {gridCols} x {gridRows} ô
-              </p>
+
+              <div className="board-size-tools">
+                <div className="board-grid-editor" aria-label="Chỉnh kích thước lưới sân">
+                  <span className="board-grid-label">Lưới</span>
+
+                  <input
+                    className="board-grid-input"
+                    type="number"
+                    min={4}
+                    max={20}
+                    value={gridCols}
+                    title="Số cột"
+                    onChange={(e) => handleColsChange(Number(e.target.value))}
+                  />
+
+                  <span className="board-grid-separator">×</span>
+
+                  <input
+                    className="board-grid-input"
+                    type="number"
+                    min={4}
+                    max={14}
+                    value={gridRows}
+                    title="Số hàng"
+                    onChange={(e) => handleRowsChange(Number(e.target.value))}
+                  />
+
+                  <span className="board-grid-unit">ô</span>
+                </div>
+
+                <label className="board-cell-editor" title="Cỡ mỗi ô trên sân">
+                  <span>Cỡ ô</span>
+                  <input
+                    className="board-cell-input"
+                    type="number"
+                    min={40}
+                    max={90}
+                    value={cellSize}
+                    onChange={(e) => handleCellSizeChange(Number(e.target.value))}
+                  />
+                  <span>px</span>
+                </label>
+              </div>
             </div>
 
             {selectedObstacle && (
@@ -2078,8 +2065,8 @@ export default function App() {
                   setRightPanelCollapsed(false);
 
                   setOpenMenus((prev) => ({
-                    ...prev,
-                    edit: true,
+                    ...createMenuState("edit"),
+                    objects: prev.objects,
                   }));
 
                   if (o.type !== "player") {
@@ -2663,10 +2650,7 @@ export default function App() {
                 );
                 setSelectedId(null);
 
-                setOpenMenus((prev) => ({
-                  ...prev,
-                  edit: false,
-                }));
+                setOpenMenus((prev) => (prev.edit ? { ...createMenuState(null), objects: prev.objects } : prev));
               }}
             >
               Xóa chọn
