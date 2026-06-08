@@ -497,6 +497,7 @@ export default function App() {
   const [availableObjects, setAvailableObjects] =
     useState<PaletteItem[]>(createDefaultObjects);
   const [objectSearchKeyword, setObjectSearchKeyword] = useState("");
+  const [allowObstacleOverlap, setAllowObstacleOverlap] = useState(false);
   const [obstacles, setObstacles] = useState<Obstacle[]>([]);
 
   const selectedObstacle = obstacles.find((o) => o.id === selectedId) || null;
@@ -687,10 +688,12 @@ export default function App() {
       .filter(Boolean) as Array<RouteLine & { points: Point[] }>;
   }, [routes, obstacles, cellSize]);
 
-  const canPlaceObstacle = (next: Obstacle, ignoreId?: string) => {
-    if (!isInsideBoard(next.col, next.row, next.w, next.h)) return false;
-
-    return !obstacles.some((o) => {
+  const hasObstacleCollision = (
+    next: Obstacle,
+    sourceObstacles: Obstacle[],
+    ignoreId?: string,
+  ) => {
+    return sourceObstacles.some((o) => {
       if (o.id === ignoreId) return false;
 
       const overlapX = next.col < o.col + o.w && next.col + next.w > o.col;
@@ -698,6 +701,16 @@ export default function App() {
 
       return overlapX && overlapY;
     });
+  };
+
+  const canPlaceObstacle = (next: Obstacle, ignoreId?: string) => {
+    if (!isInsideBoard(next.col, next.row, next.w, next.h)) return false;
+
+    if (allowObstacleOverlap) {
+      return true;
+    }
+
+    return !hasObstacleCollision(next, obstacles, ignoreId);
   };
 
   const getDropCell = (clientX: number, clientY: number) => {
@@ -713,6 +726,29 @@ export default function App() {
     if (!isInsideBoard(col, row)) return null;
 
     return { col, row };
+  };
+
+  const getFreeDropPosition = (
+    clientX: number,
+    clientY: number,
+    w = 1,
+    h = 1,
+    offsetX = 0,
+    offsetY = 0,
+  ) => {
+    const rect = boardRef.current?.getBoundingClientRect();
+    if (!rect) return null;
+
+    const maxX = Math.max(0, (gridCols - w) * cellSize);
+    const maxY = Math.max(0, (gridRows - h) * cellSize);
+
+    const x = Math.max(0, Math.min(clientX - rect.left - offsetX, maxX));
+    const y = Math.max(0, Math.min(clientY - rect.top - offsetY, maxY));
+
+    return {
+      col: x / cellSize,
+      row: y / cellSize,
+    };
   };
 
   const getBoardPointFromClient = (
@@ -976,7 +1012,21 @@ export default function App() {
           isInsideBoard(item.col, item.row, item.w, item.h),
         );
 
-        setObstacles((prev) => [...prev, ...validObstacles]);
+        setObstacles((prev) => {
+          if (allowObstacleOverlap) {
+            return [...prev, ...validObstacles];
+          }
+
+          const nextObstacles = [...prev];
+
+          validObstacles.forEach((item) => {
+            if (!hasObstacleCollision(item, nextObstacles)) {
+              nextObstacles.push(item);
+            }
+          });
+
+          return nextObstacles;
+        });
         setSelectedId(null);
 
         setOpenMenus((prev) => (prev.edit ? { ...createMenuState(null), objects: prev.objects } : prev));
@@ -1221,12 +1271,22 @@ export default function App() {
     const raw = e.dataTransfer.getData("application/json");
     if (!raw) return;
 
-    const cell = getDropCell(e.clientX, e.clientY);
-    if (!cell) return;
-
     const data = JSON.parse(raw);
 
     if (data.kind === "palette-obstacle") {
+      const position = allowObstacleOverlap
+        ? getFreeDropPosition(
+          e.clientX,
+          e.clientY,
+          data.w,
+          data.h,
+          typeof data.offsetX === "number" ? data.offsetX : (data.w * cellSize) / 2,
+          typeof data.offsetY === "number" ? data.offsetY : (data.h * cellSize) / 2,
+        )
+        : getDropCell(e.clientX, e.clientY);
+
+      if (!position) return;
+
       const next: Obstacle = {
         id: makeId(),
         type: data.type,
@@ -1234,8 +1294,8 @@ export default function App() {
           data.type === "player"
             ? `Người chơi ${obstacles.filter((item) => item.type === "player").length + 1}`
             : data.label,
-        col: cell.col,
-        row: cell.row,
+        col: position.col,
+        row: position.row,
         w: data.w,
         h: data.h,
         image: data.image || "",
@@ -1253,7 +1313,20 @@ export default function App() {
       const current = obstacles.find((o) => o.id === data.id);
       if (!current) return;
 
-      const next = { ...current, col: cell.col, row: cell.row };
+      const position = allowObstacleOverlap
+        ? getFreeDropPosition(
+          e.clientX,
+          e.clientY,
+          current.w,
+          current.h,
+          typeof data.offsetX === "number" ? data.offsetX : 0,
+          typeof data.offsetY === "number" ? data.offsetY : 0,
+        )
+        : getDropCell(e.clientX, e.clientY);
+
+      if (!position) return;
+
+      const next = { ...current, col: position.col, row: position.row };
 
       if (canPlaceObstacle(next, current.id)) {
         setObstacles((prev) =>
@@ -1387,6 +1460,7 @@ export default function App() {
     setCustomRotate(0);
     setAvailableObjects(createDefaultObjects());
     setObjectSearchKeyword("");
+    setAllowObstacleOverlap(false);
     setIsCreateObjectOpen(false);
 
     setFreeDrawMode(false);
@@ -1475,6 +1549,38 @@ export default function App() {
                 )}
               </div>
 
+              <label
+                className="overlap-toggle"
+                style={{
+                  display: "flex",
+                  alignItems: "flex-start",
+                  gap: 10,
+                  marginTop: 10,
+                  marginBottom: 12,
+                  padding: "10px 12px",
+                  border: "1px solid #e5e7eb",
+                  borderRadius: 12,
+                  background: allowObstacleOverlap ? "#fff7ed" : "#f8fafc",
+                  cursor: "pointer",
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={allowObstacleOverlap}
+                  onChange={(e) => setAllowObstacleOverlap(e.target.checked)}
+                  style={{ marginTop: 3 }}
+                />
+
+                <span style={{ display: "grid", gap: 3 }}>
+                  <strong style={{ fontSize: 13, color: "#0f172a" }}>
+                    Cho phép đè vật thể
+                  </strong>
+                  <span style={{ fontSize: 12, lineHeight: 1.4, color: "#64748b" }}>
+                    Khi bật, vật thể có thể kéo tự do theo từng pixel và đặt chồng lên nhau. Khi tắt, hệ thống vẫn bám ô và chặn trùng ô như cũ.
+                  </span>
+                </span>
+              </label>
+
               <div className="card-list">
                 {filteredAvailableObjects.map((item) => (
                   <div
@@ -1501,6 +1607,8 @@ export default function App() {
                           h: item.h,
                           image: item.image || "",
                           rotate: item.rotate || 0,
+                          offsetX: (item.w * cellSize) / 2,
+                          offsetY: (item.h * cellSize) / 2,
                         }),
                       );
                     }}
@@ -2035,18 +2143,19 @@ export default function App() {
               )}
             </svg>
 
-            {obstacles.map((o) => (
+            {obstacles.map((o, index) => (
               <div
                 key={o.id}
                 className={`obstacle ${selectedId === o.id ? "obstacle-selected" : ""} ${o.type === "custom" ? "obstacle-custom" : ""
                   } ${o.type === "player" ? "player-piece" : ""} ${routeMode ? "route-pickable" : ""
                   } ${freeDrawMode ? "free-draw-ignore-object" : ""}`}
                 style={{
-                  left: o.col * cellSize + 4,
-                  top: o.row * cellSize + 4,
-                  width: o.w * cellSize - 8,
-                  height: o.h * cellSize - 8,
+                  left: o.col * cellSize + (allowObstacleOverlap ? 0 : 4),
+                  top: o.row * cellSize + (allowObstacleOverlap ? 0 : 4),
+                  width: o.w * cellSize - (allowObstacleOverlap ? 0 : 8),
+                  height: o.h * cellSize - (allowObstacleOverlap ? 0 : 8),
                   transform: `rotate(${o.rotate || 0}deg)`,
+                  zIndex: selectedId === o.id ? obstacles.length + 10 : index + 2,
                 }}
                 draggable={!routeMode && !freeDrawMode}
                 onDragEnd={() => setIsBoardDragging(false)}
@@ -2080,11 +2189,15 @@ export default function App() {
 
                   setSelectedId(o.id);
 
+                  const rect = e.currentTarget.getBoundingClientRect();
+
                   e.dataTransfer.setData(
                     "application/json",
                     JSON.stringify({
                       kind: "move-obstacle",
                       id: o.id,
+                      offsetX: e.clientX - rect.left,
+                      offsetY: e.clientY - rect.top,
                     }),
                   );
                 }}
