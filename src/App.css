@@ -74,6 +74,19 @@ button {
   grid-template-columns: var(--collapsed-width) minmax(0, 1fr) var(--collapsed-width);
 }
 
+/* Chế độ xem chỉ hiển thị sân và ghi chú vật thể. */
+.field-view-only{padding:18px;background:#eef2f7}
+.field-view-only .field-layout,
+.field-view-only .field-layout.left-collapsed,
+.field-view-only .field-layout.right-collapsed,
+.field-view-only .field-layout.left-collapsed.right-collapsed{display:block;max-width:none;min-height:auto}
+.field-view-only .left-sidebar,
+.field-view-only .right-sidebar,
+.field-view-only .board-header{display:none}
+.field-view-only .board-wrapper{min-height:auto;width:max-content;max-width:100%;margin:0 auto;padding:18px;overflow:auto}
+.field-view-only .football-board{pointer-events:none}
+.field-view-only .obstacle-selected{outline:0;box-shadow:none}
+
 /* ===== Side menu ===== */
 .sidebar {
   display: flex;

@@ -1,73 +1,36 @@
-# React + TypeScript + Vite
+# Sakura Motion
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+Hệ thống React + Node.js + MySQL quản lý chương trình vận động trẻ em tại Sakurakid Mỹ Đình.
 
-Currently, two official plugins are available:
+## Chuẩn bị MySQL trên Aiven
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+1. Trong Aiven Console, mở service MySQL và tải CA certificate thành `ca.pem` ở thư mục gốc.
+2. Sao chép `.env.example` thành `.env`, sau đó điền Host, Port, User, Password và Database trong phần Connection information.
+3. Giữ `DB_SSL=true`; không commit `.env` hoặc `ca.pem` lên Git.
+4. Khởi tạo bảng và dữ liệu mẫu:
 
-## React Compiler
-
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the ESLint configuration
-
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
-
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```bash
+yarn db:init
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+## Chạy hệ thống
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+```bash
+yarn install
+yarn dev
+```
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+Web chạy tại `http://127.0.0.1:5173`, API chạy tại `http://127.0.0.1:3001`.
+
+Tài khoản mẫu đều dùng mật khẩu `123456`:
+
+- Admin: `admin@sakurakid.vn`
+- Giáo viên: `giaovien@sakurakid.vn`
+- Phụ huynh: `phuhuynh@sakurakid.vn`
+
+## Kiểm tra
+
+```bash
+yarn lint
+yarn build
 ```

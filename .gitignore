@@ -11,6 +11,15 @@ node_modules
 dist
 dist-ssr
 *.local
+.env
+ca.pem
+
+# Tài liệu nguồn dùng để đối chiếu, không đưa vào bản triển khai web
+/*.docx
+/*.xlsx
+
+# Kho cài đặt tạm cục bộ
+.pnpm-store
 
 # Editor directories and files
 .vscode/*

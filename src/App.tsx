@@ -453,12 +453,15 @@ function MenuSection({
   );
 }
 
-export default function App() {
-  const boardRef = useRef<HTMLDivElement | null>(null);
+export type FieldLayoutData={grid?:{cols?:number;rows?:number;cellSize?:number};obstacles?:Obstacle[];routes?:RouteLine[];freeLines?:FreeLine[]};
 
-  const [gridCols, setGridCols] = useState(12);
-  const [gridRows, setGridRows] = useState(8);
-  const [cellSize, setCellSize] = useState(60);
+export default function App({onSave,initialLayout,readOnly=false}:{onSave?:(layout:unknown)=>void|Promise<void>;initialLayout?:FieldLayoutData|null;readOnly?:boolean}) {
+  const boardRef = useRef<HTMLDivElement | null>(null);
+  const [savingField, setSavingField] = useState(false);
+
+  const [gridCols, setGridCols] = useState(initialLayout?.grid?.cols||12);
+  const [gridRows, setGridRows] = useState(initialLayout?.grid?.rows||8);
+  const [cellSize, setCellSize] = useState(initialLayout?.grid?.cellSize||60);
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
@@ -472,13 +475,13 @@ export default function App() {
   const [routeMode, setRouteMode] = useState(false);
   const [draftRoute, setDraftRoute] = useState<RouteTarget[]>([]);
   const [routeName, setRouteName] = useState("Tuyến di chuyển");
-  const [routes, setRoutes] = useState<RouteLine[]>([]);
+  const [routes, setRoutes] = useState<RouteLine[]>(()=>Array.isArray(initialLayout?.routes)?initialLayout.routes:[]);
   const [routeColor, setRouteColor] = useState("#0f172a");
   const [routeWidth, setRouteWidth] = useState(3);
   const [routeStyle, setRouteStyle] = useState<LineStyle>("dashed");
 
   const [freeDrawMode, setFreeDrawMode] = useState(false);
-  const [freeLines, setFreeLines] = useState<FreeLine[]>([]);
+  const [freeLines, setFreeLines] = useState<FreeLine[]>(()=>Array.isArray(initialLayout?.freeLines)?initialLayout.freeLines:[]);
   const [draftFreeLine, setDraftFreeLine] = useState<Point[]>([]);
   const [isDrawingFreeLine, setIsDrawingFreeLine] = useState(false);
   const [freeLineColor, setFreeLineColor] = useState("#f97316");
@@ -498,7 +501,7 @@ export default function App() {
     useState<PaletteItem[]>(createDefaultObjects);
   const [objectSearchKeyword, setObjectSearchKeyword] = useState("");
   const [allowObstacleOverlap, setAllowObstacleOverlap] = useState(false);
-  const [obstacles, setObstacles] = useState<Obstacle[]>([]);
+  const [obstacles, setObstacles] = useState<Obstacle[]>(()=>Array.isArray(initialLayout?.obstacles)?initialLayout.obstacles:[]);
 
   const selectedObstacle = obstacles.find((o) => o.id === selectedId) || null;
 
@@ -549,6 +552,8 @@ export default function App() {
   React.useEffect(() => {
     if (!selectedId) return;
 
+    // Việc chọn vật thể là tín hiệu để đồng bộ trạng thái bảng công cụ chỉnh sửa.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setOpenMenus((prev) => ({
       ...createMenuState("edit"),
       objects: prev.objects,
@@ -983,6 +988,26 @@ export default function App() {
     );
   };
 
+  const saveFullField = async () => {
+    if (!onSave || savingField) return;
+    setSavingField(true);
+    try {
+      await onSave({
+        fileType: "full-field",
+        version: 1,
+        exportedAt: new Date().toISOString(),
+        grid: { cols: gridCols, rows: gridRows, cellSize },
+        obstacles,
+        routes,
+        freeLines,
+      });
+    } catch (error) {
+      alert(error instanceof Error ? error.message : "Không thể lưu sơ đồ sân");
+    } finally {
+      setSavingField(false);
+    }
+  };
+
   const importObstacleGroup = (file: File | undefined) => {
     if (!file) return;
 
@@ -1030,7 +1055,7 @@ export default function App() {
         setSelectedId(null);
 
         setOpenMenus((prev) => (prev.edit ? { ...createMenuState(null), objects: prev.objects } : prev));
-      } catch (error) {
+      } catch {
         alert(
           "Không thể nhập cụm vật thể. Vui lòng chọn đúng file JSON đã xuất.",
         );
@@ -1202,7 +1227,7 @@ export default function App() {
         setDragLane(null);
 
         setOpenMenus((prev) => (prev.edit ? { ...createMenuState(null), objects: prev.objects } : prev));
-      } catch (error) {
+      } catch {
         alert(
           "Không thể nhập toàn bộ sân. Vui lòng chọn đúng file JSON đã xuất.",
         );
@@ -1490,7 +1515,7 @@ export default function App() {
   const draftPolyline = pointsToSvg(draftPoints);
 
   return (
-    <div className="field-page">
+    <div className={`field-page ${readOnly ? "field-view-only" : ""}`}>
       <div
         className={`field-layout ${leftPanelCollapsed ? "left-collapsed" : ""} ${rightPanelCollapsed ? "right-collapsed" : ""
           }`}
@@ -2157,10 +2182,11 @@ export default function App() {
                   transform: `rotate(${o.rotate || 0}deg)`,
                   zIndex: selectedId === o.id ? obstacles.length + 10 : index + 2,
                 }}
-                draggable={!routeMode && !freeDrawMode}
+                draggable={!readOnly && !routeMode && !freeDrawMode}
                 onDragEnd={() => setIsBoardDragging(false)}
                 onClick={(e) => {
                   e.stopPropagation();
+                  if (readOnly) return;
 
                   if (routeMode) {
                     handleAddObstacleToRoute(o);
@@ -2501,6 +2527,9 @@ export default function App() {
                   <button className="btn btn-green" onClick={exportFullField}>
                     Xuất sân
                   </button>
+                  {onSave && !readOnly && <button className="btn btn-green" disabled={savingField} onClick={()=>void saveFullField()}>
+                    {savingField ? "Đang lưu..." : "Lưu vào kho sân"}
+                  </button>}
 
                   <label className="btn btn-blue import-file-btn">
                     Nhập sân
