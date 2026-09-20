@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 export type Session={token:string;user:{id:number;campus_id:number;full_name:string;email:string;role:"admin"|"teacher"|"parent"}};
-export type Bootstrap={classes:any[];students:any[];parents:any[];exercises:any[];fields:any[];lessons:any[];templates:any[];rounds:any[];results:any[];children:any[]};
+export type Bootstrap={classes:any[];students:any[];parents:any[];teachers:any[];exercises:any[];fields:any[];lessons:any[];templates:any[];rounds:any[];results:any[];children:any[]};
 
 async function request(path:string,options:RequestInit={}){
   const response=await fetch(`/api${path}`,{...options,headers:{"Content-Type":"application/json",...(options.headers||{})}});
