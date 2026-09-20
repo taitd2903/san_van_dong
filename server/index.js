@@ -49,4 +49,6 @@ app.post("/api/results",asyncRoute(async(req,res)=>{if(!["admin","teacher"].incl
 app.patch("/api/results/:id/publish",admin,asyncRoute(async(req,res)=>{await db.execute("UPDATE results SET status='published',published_at=NOW() WHERE id=?",[req.params.id]);res.json({ok:true});}));
 app.get("/api/parent/children/:id/results",asyncRoute(async(req,res)=>{if(req.user.role==="parent"){const [linked]=await rows("SELECT 1 ok FROM parent_students WHERE parent_id=? AND student_id=?",[req.user.id,req.params.id]);if(!linked)return res.status(403).json({message:"Học sinh không thuộc tài khoản này"});}res.json(await rows("SELECT r.*,er.name round_name,er.exam_type,er.starts_on FROM results r JOIN exam_rounds er ON er.id=r.round_id WHERE r.student_id=? AND r.status='published' ORDER BY er.starts_on DESC",[req.params.id]));}));
 app.use((err,_req,res,_next)=>{console.error(err);res.status(err.code==="ECONNREFUSED"?503:500).json({message:err.code==="ECONNREFUSED"?"Không kết nối được MySQL. Hãy kiểm tra file .env và chạy yarn db:init.":err.message||"Lỗi máy chủ"});});
-app.listen(port,"127.0.0.1",()=>console.log(`API Sakura Motion: http://127.0.0.1:${port}`));
+if(!process.env.VERCEL)app.listen(port,"127.0.0.1",()=>console.log(`API Sakura Motion: http://127.0.0.1:${port}`));
+
+export default app;
